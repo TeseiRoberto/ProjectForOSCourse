@@ -21,7 +21,7 @@ typedef struct _Worker {
 	pthread_t tid;				// Id of the worker thread
 	sem_t isBusy;				// Semaphore that signals to worker that it has a request to satisfy
 	sem_t isFree;				// Semaphore that signals to main thread that worker can accept a new request
-	Packet_t request;			// Request packet sended by client
+	Packet_t request;			// Request packet sent by client
 	struct sockaddr_in clientAddr;		// Struct that contains the address of the client of which we need to satisfy request
 	socklen_t addrLen;			// Length of the client address
 } Worker_t;
@@ -35,11 +35,11 @@ void DestroyWorkers(int workersNum, int threadNum, int busySemNum, int freeSemNu
 void* HandleRequest(void* index);
 void Shell();
 
-Phonebook_t* pb = NULL;						// Global instance of phonebook struct
-int serverRunning = 1;						// Indicates if server is active
+Phonebook_t* pb = NULL;				// Global instance of phonebook struct
+int serverRunning = 1;				// Indicates if server is active
 int serverSock = -1;
-pthread_mutex_t socketMutx;					// Mutex to regulate write operations on server's socket
-Worker_t workers[MAX_CLIENT_NUM];				// Workers that works to satisfy clients requests
+pthread_mutex_t socketMutx;			// Mutex to regulate write operations on server's socket
+Worker_t workers[MAX_CLIENT_NUM];		// Workers that works to satisfy clients requests
 
 int main(int argc, char* argv[])
 {
@@ -61,8 +61,8 @@ int main(int argc, char* argv[])
 
 	if(InitializeSocket(SERVER_PORT_NUM) == 0)		// Initialize server's socket
 	{
-		DestroyPhonebook(&pb);
 		DestroyWorkers(MAX_CLIENT_NUM, MAX_CLIENT_NUM, MAX_CLIENT_NUM, MAX_CLIENT_NUM);
+		DestroyPhonebook(&pb);
 		exit(-1);
 	}
 
@@ -171,21 +171,21 @@ int InitializeWorkers(int workersNum)
 		memset(&workers[i].clientAddr, 0, sizeof(struct sockaddr_in));		// Initialize client address struct
 		workers[i].addrLen = sizeof(struct sockaddr_in);
 
-		if(sem_init(&workers[i].isBusy, 0, 0) == -1)				// Initialize busy semaphore
+		if(sem_init(&workers[i].isBusy, 0, 0) == -1)				// Initialize isBusy semaphore
 		{
 			fprintf(stderr, "Error: cannot initialize busy semaphore for worker %d...\n", i + 1);
 			DestroyWorkers(i, i - 1, i - 1, i - 1);
 			return 0;
 		}
 
-		if(sem_init(&workers[i].isFree, 0, 1) == -1)
+		if(sem_init(&workers[i].isFree, 0, 1) == -1)				// Initialize isFree semaphore
 		{
 			fprintf(stderr, "Error: cannot initialize free semaphore for worker %d\n", i + 1);
 			DestroyWorkers(i, i - 1, i, i - 1);
 			return 0;
 		}
 
-		if(pthread_create(&workers[i].tid, NULL, HandleRequest, (void*) i) != 0)
+		if(pthread_create(&workers[i].tid, NULL, HandleRequest, (void*) i) != 0) // Create thread
 		{
 			fprintf(stderr, "Error: cannot initialize thread for worker %d...\n", i +1);
 			DestroyWorkers(i, i - 1, i, i);
@@ -198,7 +198,7 @@ int InitializeWorkers(int workersNum)
 }
 
 
-// Destroyes all synch mechanism
+// Destroyes all synch mechanism and shutdown worker threads
 void DestroyWorkers(int workersNum, int threadNum, int busySemNum, int freeSemNum)
 {
 	printf("Destroying workers... ");
@@ -230,15 +230,15 @@ void* HandleRequest(void* index)
 	while(serverRunning == 1)
 	{
 		memset(&response, 0, sizeof(Packet_t));
-		sem_wait(&workers[i].isBusy);								// Wait until a request arrives
-		printf("THREAD %d IS HANDLING REQUEST: "); // ==== DEBUG ====
+		sem_wait(&workers[i].isBusy);								// Wait until a request arrives from main thread
+		printf("THREAD %d IS HANDLING REQUEST: ", i); // ==== DEBUG ====
 
 		if(CheckPermission(pb, workers[i].request.clientName, workers[i]. request.type) == 0)	// Check if client has permission to execute such request
 		{
 			strncpy(response.name, "You don't have permission", MAX_NAME_SIZE);		// If it does not send an error
 			response.type = REJECTED;
 			SendPacket(&response, &(workers[i].clientAddr), workers[i].addrLen);
-			sem_post(&workers[i].isFree);							// Signal to main thread that we are availbale to process a new request
+			sem_post(&workers[i].isFree);							// Signal to main thread that we are available to process a new request
 			continue;
 		}
 
@@ -271,7 +271,7 @@ void* HandleRequest(void* index)
 					strncpy(response.number, node->number, MAX_PHONE_NUM_SIZE);
 					response.type = ACCEPTED;
 				}
-			}	 break;
+			}	break;
 
 			case REMOVE_CONTACT:
 				printf("REMOVE_CONTACT, FROM: %s, NAME: %s\n", workers[i].request.clientName, workers[i].request.name);
@@ -305,7 +305,7 @@ void* HandleRequest(void* index)
 						response.type = REJECTED;
 					}
 				}
-			}	 break;
+			}	break;
 
 			default:
 				printf(" INVALID REQUEST from: %s\n", workers[i].request.clientName);
@@ -318,7 +318,7 @@ void* HandleRequest(void* index)
 		SendPacket(&response, &(workers[i].clientAddr), workers[i].addrLen);		// Send response packet
 		pthread_mutex_unlock(&socketMutx);
 
-		sem_post(&workers[i].isFree);							// Signal to main thread that we are availbale to process a new request
+		sem_post(&workers[i].isFree);							// Signal to main thread that we are available to process a new request
 	}
 
 	return NULL;

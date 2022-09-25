@@ -294,6 +294,7 @@ int AddContact(char* name, char* number, char* response)
 	}
 
 	snprintf(response, MAX_RESPONSE_SIZE, "%s", serverResponse.name);
+	return 1;
 }
 
 
