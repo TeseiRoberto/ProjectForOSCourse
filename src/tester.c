@@ -32,9 +32,14 @@ void* SimulateRequest(void* index);
 void PrintResults(Tester_t* tester, int testerNum);
 
 
-char* toSearch = "Giuseppe";			// Name used for simulated GET_CONTACT requests
-char* toAdd = "Max";			// Name used for simulated ADD_CONTACT requests
-char* toRemove = "Anna";			// Name used for simulated REMOVE_CONTACT requests
+// Array of strings that will be used when simulating GET_CONTACT requests
+char* toSearch[] = { "Giuseppe", "Anna", "Gianni", "Luca"};
+
+// Array of strings that will be used when simulating GET_CONTACT requests
+char* toAdd[] = { "Max", "Riccardo", "Laura", "Andrea" };
+
+// Array of strings that will be used when simulating GET_CONTACT requests
+char* toRemove[] = { "Ugo", "Federico", "Alessandra", "Miriam"};
 
 Tester_t* testers = NULL;		// Array of Tester_t structs
 struct addrinfo* serverAddr = NULL;	// Struct that contains server's address
@@ -57,6 +62,14 @@ int main(int argc, char* argv[])
 	if((getReqNum + addReqNum + removeReqNum) != testersNum)
 	{
 		fprintf(stderr, "Error: getRequestNum + addRequestNum + removeRequestNum must be equal to clientsNum\n");
+		exit(-1);
+	}
+
+	// Check that hardcoded arrays (toSearch, toAdd and toRemove) have enough elements to simulate requests
+	if(getReqNum > (int)(sizeof(toSearch) / sizeof(char*)) || addReqNum > (int)(sizeof(toAdd) / sizeof(char*)) || removeReqNum > (int)(sizeof(toRemove) / sizeof(char*)))
+	{
+		fprintf(stderr, "Error: one of the given request num is grather than elements in the string array that is used to simulate requests,");
+		fprintf(stderr, "please edit source code, add elements to the array and recompile tester.c\n");
 		exit(-1);
 	}
 
@@ -174,6 +187,10 @@ int InitializeTesters(Tester_t** testers, int testerNum, int getReqNum, int addR
 		return 0;
 	}
 
+	int getReqMade = 0;		// Keeps track of how many GET_CONTACT request we made and is used as index for toSearch string array
+	int addReqMade = 0;		// Keeps track of how many ADD_CONTACT request we made and is used as index for toAdd string array
+	int removeReqMade = 0;		// Keeps track of how many REMOVE_CONTACT request we made and is used as index for toRemove string array
+
 	for(int i = 0; i < testerNum; i++)				// For each tester in the array
 	{
 		Tester_t* curr = &( (*testers)[i] );
@@ -216,22 +233,24 @@ int InitializeTesters(Tester_t** testers, int testerNum, int getReqNum, int addR
 			return 0;
 		}
 
-		if(getReqNum > 0)					// Choose a request type to simulate with curr tester
+		if(getReqMade < getReqNum)					// Choose a request type to simulate with curr tester
 		{
 			curr->request.type = GET_CONTACT;
-			strncpy(curr->request.name, toSearch, MAX_NAME_SIZE);			// Set name in packet
-			getReqNum--;
-		} else if(addReqNum > 0)
+			strncpy(curr->request.name, toSearch[getReqMade], MAX_NAME_SIZE);	// Set name in packet
+			getReqMade++;
+
+		} else if(addReqMade < addReqNum)
 		{
 			curr->request.type = ADD_CONTACT;
-			strncpy(curr->request.name, toAdd, MAX_NAME_SIZE);			// Set name in packet
+			strncpy(curr->request.name, toAdd[addReqMade], MAX_NAME_SIZE);		// Set name in packet
 			strncpy(curr->request.number, "1234567890", MAX_PHONE_NUM_SIZE);	// Set number in packet
-			addReqNum--;
-		} else if(removeReqNum > 0)
+			addReqMade++;
+
+		} else if(removeReqMade < removeReqNum)
 		{
 			curr->request.type = REMOVE_CONTACT;
-			strncpy(curr->request.name, toRemove, MAX_NAME_SIZE);			// Set name in packet
-			removeReqNum--;
+			strncpy(curr->request.name, toRemove[removeReqMade], MAX_NAME_SIZE);	// Set name in packet
+			removeReqMade++;
 		}
 	}
 
