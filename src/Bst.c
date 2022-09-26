@@ -13,8 +13,6 @@ BstNode_t* AddNode(BstNode_t** root, const char* name, const char* number, size_
 
 	memcpy(newNode->name, name, MAX_NAME_SIZE);
 	memcpy(newNode->number, number, MAX_PHONE_NUM_SIZE);
-	//strncpy(newNode->name, name, MAX_NAME_SIZE);
-	//strncpy(newNode->number, number, MAX_PHONE_NUM_SIZE);
 	newNode->offset = offset;
 	newNode->leftChild = newNode->rightChild = NULL;
 
@@ -37,7 +35,6 @@ BstNode_t* AddNode(BstNode_t** root, const char* name, const char* number, size_
 
 		if(strncmp(name, temp->name, MAX_NAME_SIZE) == 0)	// If a node with same name already exist
 		{
-			printf("CANNNOT INSERT %s, NAME IS ALREADY IN TREE\n", name);
 			free(newNode);					// Then add node has failed
 			return NULL;
 		}

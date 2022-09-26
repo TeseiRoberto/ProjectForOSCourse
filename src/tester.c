@@ -14,147 +14,106 @@
 #include "Constants.h"
 #include "Packet.h"
 
-int InitializeSockets(int** socketArray, int socketNum, const char* address, const char* portNum, struct addrinfo** addrStruct);
-void DestroySockets(int** socketArray, int socketNum);
+typedef struct _Tester {
+	pthread_t tid;			// Id of the thread used to simulate 
+	int sock;			// Socket used by tester to communicate
+	Packet_t request;		// Request that tester will send to server
+	Packet_t response;		// Response that tester will receive from server
+} Tester_t;
+
+
+int InitializeSocket(int* sock, const char* address, const char* portNum, struct addrinfo** addrStruct);
 int SendPacket(int sock, Packet_t* pack);
 int ReceivePacket(int sock, Packet_t* pack);
 
-int InitializeTesters(pthread_t** threadArray, int threadNum);
-void DestroyTesters(pthread_t** threadArray);
-
+int InitializeTesters(Tester_t** testers, int threadNum, int getReqNum, int addReqNum, int removeReqNum);
+void DestroyTesters(Tester_t** testers, int testerNum);
 void* SimulateRequest(void* index);
+void PrintResults(Tester_t* tester, int testerNum);
 
-int testersNum = 0;			// Number of threads that will simulate clients sending request to server
-int getRequestNum = 0;			// Number of GET_CONTACT request that will be sent to server
-int addRequestNum = 0;			// Number of ADD_CONTACT request that will be sent to server
-int removeRequestNum = 0;		// Number of REMOVE_CONTACT request that will be sent to server
+
+char* toSearch = "Giuseppe";			// Name used for simulated GET_CONTACT requests
+char* toAdd = "Max";			// Name used for simulated ADD_CONTACT requests
+char* toRemove = "Anna";			// Name used for simulated REMOVE_CONTACT requests
+
+Tester_t* testers = NULL;		// Array of Tester_t structs
 struct addrinfo* serverAddr = NULL;	// Struct that contains server's address
-
-char* toSearch = "Giuseppe"			// Name used for simulated GET_CONTACT requests
-char* toAdd = "Max"			// Name used for simulated ADD_CONTACT requests
-char* toRemove = "Anna"			// Name used for simulated REMOVE_CONTACT requests
-
-int* socks = NULL;			// Array of sockets
-pthread_t* testers = NULL;		// Array of threads
 sem_t startSem;				// Semaphore to enable begin of simulation
-pthread_mutex_t requestMutx;		// Mutex used to regulate the decision of which request should a tester simulate
 
 int main(int argc, char* argv[])
 {
 	if(argc != 5)
 	{
-		fprintf(stderr, "usage is: %s <clientsNum> <getRequestNum> <addRequestNum> <removeRequestNum>\n", argv[0]);
+		fprintf(stderr, "usage is: %s <clients num> <get request num> <add request num> <remove request num>\n", argv[0]);
 		exit(-1);
 	}
 
-	testersNum = (int) strtol(argv[1], NULL, 10);
-	getRequestNum = (int) strtol(argv[2], NULL, 10);
-	addRequestNum = (int) strtol(argv[3], NULL, 10);
-	removeRequestNum = (int) strtol(argv[4], NULL, 10);
+	int testersNum = (int) strtol(argv[1], NULL, 10);
+	int getReqNum = (int) strtol(argv[2], NULL, 10);	// Num of tester that will simulate a GET_CONTACT request
+	int addReqNum = (int) strtol(argv[3], NULL, 10);	// Num of tester that will simulate a ADD_CONTACT request
+	int removeReqNum = (int) strtol(argv[4], NULL, 10);	// Num of tester that will simulate a REMOVE_CONTACT request
 
-	// Check that for clients that will be simulated thre is a request type
-	if((getRequestNum + addRequestNum + removeRequestNum) != testersNum)
+	// Check that for all clients that will be simulated thre is a request type
+	if((getReqNum + addReqNum + removeReqNum) != testersNum)
 	{
 		fprintf(stderr, "Error: getRequestNum + addRequestNum + removeRequestNum must be equal to clientsNum\n");
 		exit(-1);
 	}
 
-	// Allocate and initialize an array of sockets
-	if(InitializeSockets(&socks, testersNum, LOCAL_ADDRESS, SERVER_PORT_NUM, &serverAddr) == 0)
+	// Allocate and initialize an array of testers
+	if(InitializeTesters(&testers, testersNum, getReqNum, addReqNum, removeReqNum) == 0)
 		exit(-1);
 
-	// Allocate and initialize an array of threads
-	if(InitializeTesters(&testers, testersNum) == 0)
-	{
-		DestroySockets(&socks, testersNum);
-		exit(-1);
-	}
-
-	printf("Tester will simulate %d clients making: %d \"get\", %d \"add\" and %d \"remove\" request to server\n\n", testersNum, getRequestNum, addRequestNum, removeRequestNum);
+	printf("Tester will simulate %d clients making: %d \"get\", %d \"add\" and %d \"remove\" request to server\n\n", testersNum, getReqNum, addReqNum, removeReqNum);
 
 	for(int i = 0; i < testersNum; i++)			// Enable tester threads to simulate
 		sem_post(&startSem);
 
 	for(int i = 0; i < testersNum; i++)			// Wait completion of all testers
-		pthread_join(testers[i], NULL);
+		pthread_join(testers[i].tid, NULL);
 
-	DestroyTesters(&testers);
-	DestroySockets(&socks, testersNum);
+	PrintResults(testers, testersNum);			// Print results of all testers
+	DestroyTesters(&testers, testersNum);
 	return 0;
 }
 
 
-// Allocates an array of sockets with socketNum elements and initializes all of them, also retrives and initializes serverAddress
-int InitializeSockets(int** socketArray, int socketNum, const char* address, const char* portNum, struct addrinfo** addrStruct)
+// Creates a new socket for UDP communication, also retrives and initializes serverAddress (if yet not initialized)
+int InitializeSocket(int* sock, const char* address, const char* portNum, struct addrinfo** addrStruct)
 {
-	// Check if something has already been initialized or if there are missing parameters
-	if(socketArray == NULL || *socketArray != NULL || address == NULL || portNum == NULL || addrStruct == NULL || *addrStruct != NULL)
+	if(*sock != -1 || address == NULL || portNum == NULL || addrStruct == NULL)
 		return 0;
 
-	printf("Intializing sockets... ");
-
-	*addrStruct = malloc(sizeof(struct addrinfo));		// Allocate memory to hold server's address
-	if(*addrStruct == NULL)
+	if(*addrStruct == NULL)					// If server address has not yet been initialized
 	{
-		fprintf(stderr, "Error: cannot allocate memory to hold server's address\n");
-		return 0;
-	}
-
-	struct addrinfo addrHints;				// Set properties that server's address should have
-	memset(&addrHints, 0, sizeof(struct addrinfo));
-	memset(serverAddr, 0, sizeof(struct addrinfo));
-	addrHints.ai_family = AF_INET;
-	addrHints.ai_protocol = 0;
-	addrHints.ai_socktype = SOCK_DGRAM;
-
-	if(getaddrinfo(address, portNum, &addrHints, addrStruct) != 0)	// Try to get server's address
-	{
-		fprintf(stderr, "Error: getaddrinfo() failed\n");
-		return 0;
-	}
-
-	*socketArray = malloc(sizeof(int) * socketNum);		// Allocate an array of sockets
-	if(*socketArray == NULL)
-	{
-		freeaddrinfo(*addrStruct);
-		fprintf(stderr, "Error: cannot allocate array of sockets\n");
-		return 0;
-	}
-
-	for(int i = 0; i < socketNum; i++)
-	{
-		(*socketArray)[i] = socket((*addrStruct)->ai_family, (*addrStruct)->ai_socktype, (*addrStruct)->ai_protocol);
-		if((*socketArray)[i] == -1)
+		*addrStruct = malloc(sizeof(struct addrinfo));	// Allocate memory to hold server's address
+		if(*addrStruct == NULL)
 		{
-			printf("Creation of socket failed!\n"); // DEBUG
-			for(int j = 0; j < i; j++)		// Close all sockets already opened
-				close((*socketArray)[j]);
+			fprintf(stderr, "Error: cannot allocate memory to hold server's address...\n");
+			return 0;
+		}
 
-			fprintf(stderr, "Error: cannot create socket for client\n");
-			freeaddrinfo(serverAddr);
-			free(*socketArray);
-			*socketArray = NULL;
+		struct addrinfo addrHints;			// Set properties that server's address should have
+		memset(&addrHints, 0, sizeof(struct addrinfo));
+		memset(serverAddr, 0, sizeof(struct addrinfo));
+		addrHints.ai_family = AF_INET;
+		addrHints.ai_protocol = 0;
+		addrHints.ai_socktype = SOCK_DGRAM;
+
+		if(getaddrinfo(address, portNum, &addrHints, addrStruct) != 0)	// Try to get server's address
+		{
+			fprintf(stderr, "Error: getaddrinfo() failed...\n");
 			return 0;
 		}
 	}
 
-	printf("Sockets array ready!\n");
-	return 1;
-}
-
-
-// Closes all sockets and deallocates memory
-void DestroySockets(int** socketArray, int socketNum)
-{
-	printf("Destroying sockets\n"); // DEBUG
-	
-	for(int i = 0; i < socketNum; i++)
+	*sock = socket((*addrStruct)->ai_family, (*addrStruct)->ai_socktype, (*addrStruct)->ai_protocol);
+	if(*sock == -1)
 	{
-		close((*socketArray)[i]);
+		fprintf(stderr, "Error: cannot create socket for tester...\n");
+		return 0;
 	}
-
-	free(*socketArray);
-	*socketArray = NULL;
+	return 1;
 }
 
 
@@ -167,7 +126,7 @@ int SendPacket(int sock, Packet_t* pack)
 	int bytesSent = 0;
 	bytesSent = sendto(sock, pack, sizeof(Packet_t), 0, serverAddr->ai_addr, serverAddr->ai_addrlen);
 
-	if(bytesSent != sizeof(Packet_t))			// Check that all packet has been sent
+	if(bytesSent != sizeof(Packet_t))			// Check that all packet is been sent
 	{
 		return 0;
 	}
@@ -185,7 +144,7 @@ int ReceivePacket(int sock, Packet_t* pack)
 	size_t bytesReceived = 0;
 	bytesReceived = recv(sock, pack, sizeof(Packet_t), 0);
 
-	if(bytesReceived != sizeof(Packet_t))			// Check that a complete packet has been received
+	if(bytesReceived != sizeof(Packet_t))			// Check that a complete packet is been received
 	{
 		return 0;
 	}
@@ -194,126 +153,164 @@ int ReceivePacket(int sock, Packet_t* pack)
 }
 
 
-// Allocates an array of threads with threadNum elements and initializes all of them
-int InitializeTesters(pthread_t** threadArray, int threadNum)
+// Allocates an array of Tester_t with testerNum elements and initializes all of them, also initialize a semaphre to synch testers
+int InitializeTesters(Tester_t** testers, int testerNum, int getReqNum, int addReqNum, int removeReqNum)
 {
-	if(threadArray == NULL || *threadArray != NULL)
+	if(testers == NULL || *testers != NULL || testerNum == 0)
 		return 0;
 
-	printf("Intializing threads... ");
+	printf("Intializing testers... ");
+	*testers = malloc(sizeof(Tester_t) * testerNum);		// Allocate an array of Tester_t
+	if(*testers == NULL)
+	{
+		fprintf(stderr, "Error: cannot allocate array of testers...\n");
+		return 0;
+	}
 
-	if(sem_init(&startSem, 0, 0) != 0)			// Intialize semaphore to synh testers
+	if(sem_init(&startSem, 0, 0) != 0)				// Intialize semaphore to synch testers
 	{
 		fprintf(stderr, "Error: cannot initialize start semaphore\n");
+		free(*testers);
 		return 0;
 	}
 
-	if(pthread_mutex_init(&requestMutx, NULL) != 0)		// Initialize mutex to synch decision of which type of request should a tester simulate
+	for(int i = 0; i < testerNum; i++)				// For each tester in the array
 	{
-		fprintf(stderr, "Error: cannot initialize request mutex\n");
-		sem_destroy(&startSem);
-		return 0;
-	}
-
-	*threadArray = malloc(sizeof(pthread_t) * threadNum);	// Allocate an array of threads (one for each tester)
-	if(*threadArray == NULL)
-	{
-		fprintf(stderr, "Error: cannot allocate array of threads for testers\n");
-		return 0;
-	}
-
-	for(int i = 0; i < threadNum; i++)			// Create threads
-	{
-			if(pthread_create(&(*threadArray)[i], NULL, SimulateRequest, (void*) i) != 0)
+		Tester_t* curr = &( (*testers)[i] );
+		memset(&curr->request, 0, sizeof(Packet_t));			// Set request and response packet to default value
+		memset(&curr->response, 0, sizeof(Packet_t));
+		curr->sock = -1;
+		strncpy(curr->request.clientName, "admin", MAX_NAME_SIZE);	// Set clientName in request as "admin" so that it has all permissions
+		
+		if(InitializeSocket(&curr->sock, LOCAL_ADDRESS, SERVER_PORT_NUM, &serverAddr) == 0)	// Create a socket
+		{
+			for(int j = 0; j < i; j++)			// If create socket fails 
 			{
-				fprintf(stderr, "Error: creation of thread for tester %d failed\n", i + 1);
-				for(int j = 0; j < i; j++)	// Destroy all already created threads
-					pthread_cancel((*threadArray)[j]);
+				curr = &( (*testers)[j]);
+				pthread_cancel(curr->tid);		// Quit all threads previously launched
 
-				sem_destroy(&startSem);
-				free(*threadArray);
-				*threadArray = NULL;
-				return 0;
+				if(curr->sock != -1)
+					close(curr->sock);		// Close all sockets previously opened
 			}
+
+			free(*testers);
+			sem_destroy(&startSem);
+			return 0;
+		}
+
+		if(pthread_create(&curr->tid, NULL, SimulateRequest, (void*) curr) != 0)	// Launch thread for tester
+		{
+			fprintf(stderr, "Error: creation of thread for tester %d failed\n", i + 1);
+			for(int j = 0; j < (i + 1); j++)			// If launch thread fails 
+			{
+				curr = &( (*testers)[j]);
+
+				if(j < i)
+					pthread_cancel(curr->tid);		// Quit all threads previously launched
+
+				close(curr->sock);			// Close all sockets previously opened
+			}
+
+			free(*testers);
+			sem_destroy(&startSem);
+			return 0;
+		}
+
+		if(getReqNum > 0)					// Choose a request type to simulate with curr tester
+		{
+			curr->request.type = GET_CONTACT;
+			strncpy(curr->request.name, toSearch, MAX_NAME_SIZE);			// Set name in packet
+			getReqNum--;
+		} else if(addReqNum > 0)
+		{
+			curr->request.type = ADD_CONTACT;
+			strncpy(curr->request.name, toAdd, MAX_NAME_SIZE);			// Set name in packet
+			strncpy(curr->request.number, "1234567890", MAX_PHONE_NUM_SIZE);	// Set number in packet
+			addReqNum--;
+		} else if(removeReqNum > 0)
+		{
+			curr->request.type = REMOVE_CONTACT;
+			strncpy(curr->request.name, toRemove, MAX_NAME_SIZE);			// Set name in packet
+			removeReqNum--;
+		}
 	}
 
-	printf("Threads are ready\n");
+	printf("Testers are ready\n");
 	return 1;
 }
 
 
-// Deallocates memory (does not call pthread_cancel because in main we already called pthread_join so we are sure that threads returned)
-void DestroyTesters(pthread_t** threadArray)
+// Deallocates memory and close sockets (does not call pthread_cancel because in main we already called pthread_join so we are sure that threads returned)
+void DestroyTesters(Tester_t** testers, int testerNum)
 {
-	if(threadArray == NULL || *threadArray == NULL)
+	if(testers == NULL || *testers == NULL)
 		return;
 
 	printf("Destroying testers\n");
 
-	free(*threadArray);
-	*threadArray = NULL;
+	for(int i = 0; i < testerNum; i++)
+	{
+		Tester_t* curr = &( (*testers)[i] );
+
+		if(curr->sock != -1)
+			close(curr->sock);
+	}
+
+	free(*testers);
+	*testers = NULL;
 	sem_destroy(&startSem);
 }
 
 
 // This function is called by each tester, it creates a request packet and sends it to the server, then waits for a response
-void* SimulateRequest(void* index)
+void* SimulateRequest(void* tester)
 {
-	int i = (int) index;
-	Packet_t request, response;
-
-	pthread_mutex_lock(&requestMutx);			// Choose wich type of request will this tester simulate
-	if(addRequestNum > 0)
-	{
-		request.type = ADD_CONTACT;
-		strncpy(request.name, toAdd, MAX_NAME_SIZE);			// Set name in packet
-		strncpy(request.number, "1234567890", MAX_NAME_SIZE);		// Set number in packet
-		addRequestNum--;
-		printf("thread %d will simulate ADD_CONTACT request\n", i + 1);
-
-	} else if(getRequestNum > 0)
-	{
-		request.type = GET_CONTACT;
-		strncpy(request.name, toSearch, MAX_NAME_SIZE);			// Set name in packet
-		getRequestNum--;
-		printf("thread %d will simulate GET_CONTACT request\n", i + 1);
-
-	} else if(removeRequestNum > 0)
-	{
-		request.type = REMOVE_CONTACT;
-		strncpy(request.name, toRemove, MAX_NAME_SIZE);			// Set name in packet
-		removeRequestNum--;
-		printf("thread %d will simulate REMOVE_CONTACT request\n", i + 1);
-
-	} else {
-		return NULL;
-	}
-
-	pthread_mutex_unlock(&requestMutx);
-
-	strncpy(request.clientName, "admin", MAX_NAME_SIZE);	// Set clientName in packet as "admin" so that it has all permissions
-
+	Tester_t* me = (Tester_t*) tester;
 	sem_wait(&startSem);					// Wait main thread to enable simulation
 
-	int a = SendPacket(socks[i], &request);
-	int b = ReceivePacket(socks[i], &response);
-
-	pthread_mutex_lock(&requestMutx);
-
-	if(a == 0)
+	if(SendPacket(me->sock, &me->request) == 0)		// Try to send request
 	{
-		printf("Thread %d has failed to send packet...\n", i + 1);
+		snprintf(me->response.name, MAX_NAME_SIZE, "Thread has failed to send request...\n");
 		return NULL;
 	}
 
-	if(b == 0)
+	if(ReceivePacket(me->sock, &me->response) == 0)		// Try to receive a response
 	{
-		printf("Thread %d has failed to receive response...\n", i + 1);
+		snprintf(me->response.name, MAX_NAME_SIZE, "Thread has failed to receive response...\n");
 		return NULL;
 	}
-
-	printf("Thread %d has received response, name: %s, number: %s\n", i + 1, response.name, response.number);
-	pthread_mutex_unlock(&requestMutx);
 
 	return NULL;
 }
+
+
+// For all tester in given array prints to console the content of their response packet
+void PrintResults(Tester_t* testers, int testerNum)
+{
+	if(testers == NULL)
+		return;
+
+	for(int i = 0; i < testerNum; i++)
+	{
+		switch(testers[i].request.type)
+		{
+			case GET_CONTACT:
+				printf("Thread %d] Request: GET_CONTACT, response is name: %s, number: %s\n", i + 1, testers[i].response.name, testers[i].response.number);
+				break;
+
+			case ADD_CONTACT:
+				printf("Thread %d] Request: ADD_CONTACT, reponse is: %s\n", i + 1, testers[i].response.name);
+				break;
+
+			case REMOVE_CONTACT:
+				printf("Thread %d] Request: REMOVE_CONTACT, reponse is: %s\n", i + 1, testers[i].response.name);
+				break;
+
+			default:
+				printf("Thread %d] Request UNDEFINED\n", i + 1);
+				break;
+		}
+	}
+}
+
+

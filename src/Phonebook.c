@@ -67,6 +67,9 @@ int AddContact(Phonebook_t* pb, const char* name, const char* number, size_t off
 	if(pb == NULL || name == NULL || number == NULL)
 		return 0;
 
+	if(AddNode(&(pb->dataTree), name, number, offset) == NULL)		// Try to add a new node to bst
+		return 0;
+
 	if(writeOnFile == 1)							// If specified then write new contact on file
 	{
 		char newEntry[MAX_NAME_SIZE + MAX_PHONE_NUM_SIZE + 3];		// Create new entry
@@ -74,10 +77,6 @@ int AddContact(Phonebook_t* pb, const char* name, const char* number, size_t off
 		offset = lseek(pb->dataFd, 0, SEEK_CUR);			// Get cursor's position
 		WriteEntryOnFile(pb->dataFd, newEntry);				// Write new entry on file
 	}
-
-	if(AddNode(&(pb->dataTree), name, number, offset) == NULL)		// Try to add a new node to bst
-		return 0;
-
 	return 1;
 }
 
@@ -340,15 +339,12 @@ int RemoveEntryFromFile(int file, const char* data, size_t offset)
 
 	for(int i = 0; i < MAX_NAME_SIZE; i++)			// Replace SEPARATOR_CHAR with string terminator
 	{
-		printf("%c", name[i]);
 		if(name[i] == SEPARATOR_CHAR || i == (MAX_NAME_SIZE - 1))
 		{
 			name[i] = '\0';
 			break;
 		}
 	}
-
-	printf("\nRemoveEntry() is comparing: %s with %s, given offset was: %lu, now offset is: %lu\n", data, name, offset, lseek(file, 0, SEEK_CUR));
 
 	if(strncmp(name, data, MAX_NAME_SIZE) != 0)		// If given data and name readed from file are not the same
 	{

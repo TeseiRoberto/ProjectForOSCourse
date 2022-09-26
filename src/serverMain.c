@@ -22,6 +22,7 @@ typedef struct _Worker {
 	sem_t isBusy;				// Semaphore that signals to worker that it has a request to satisfy
 	sem_t isFree;				// Semaphore that signals to main thread that worker can accept a new request
 	Packet_t request;			// Request packet sent by client
+	Packet_t response;			// response packet sent to client
 	struct sockaddr_in clientAddr;		// Struct that contains the address of the client of which we need to satisfy request
 	socklen_t addrLen;			// Length of the client address
 } Worker_t;
@@ -32,13 +33,14 @@ void SendPacket(Packet_t* pack, struct sockaddr_in* clientAddr, socklen_t addrLe
 
 int InitializeWorkers(int workersNum);
 void DestroyWorkers(int workersNum, int threadNum, int busySemNum, int freeSemNum);
-void* HandleRequest(void* index);
+void* HandleRequest(void* ptrToWorker);
 void Shell();
 
 Phonebook_t* pb = NULL;				// Global instance of phonebook struct
 int serverRunning = 1;				// Indicates if server is active
 int serverSock = -1;
 pthread_mutex_t socketMutx;			// Mutex to regulate write operations on server's socket
+sem_t pbSem;					// Semaphore to regulate read and write operations on/from phonebook data
 Worker_t workers[MAX_CLIENT_NUM];		// Workers that works to satisfy clients requests
 
 int main(int argc, char* argv[])
@@ -101,7 +103,7 @@ int main(int argc, char* argv[])
 }
 
 
-// Creates server's socket for UDP protocol
+// Creates server's socket for UDP communication
 int InitializeSocket(const char* portNum)
 {
 	if(serverSock != -1 || portNum == NULL)
@@ -160,9 +162,16 @@ int InitializeWorkers(int workersNum)
 {
 	printf("Initializing worker threads... ");
 
-	if(pthread_mutex_init(&socketMutx, NULL) != 0)
+	if(pthread_mutex_init(&socketMutx, NULL) != 0)				// Initilize mutex to regulate write ops on socket
 	{
 		fprintf(stderr, "Error: cannot intialize socket's mutex...\n");
+		return 0;
+	}
+
+	if(sem_init(&pbSem, 0, MAX_CLIENT_NUM) != 0)				// Initialize semaphore to regulate read/write ops on phonebook's data
+	{
+		fprintf(stderr, "Error: cannot intialize semaphore for phonebook...\n");
+		pthread_mutex_destroy(&socketMutx);
 		return 0;
 	}
 
@@ -185,7 +194,7 @@ int InitializeWorkers(int workersNum)
 			return 0;
 		}
 
-		if(pthread_create(&workers[i].tid, NULL, HandleRequest, (void*) i) != 0) // Create thread
+		if(pthread_create(&workers[i].tid, NULL, HandleRequest, (void*) &workers[i]) != 0) // Create thread
 		{
 			fprintf(stderr, "Error: cannot initialize thread for worker %d...\n", i +1);
 			DestroyWorkers(i, i - 1, i, i);
@@ -203,6 +212,7 @@ void DestroyWorkers(int workersNum, int threadNum, int busySemNum, int freeSemNu
 {
 	printf("Destroying workers... ");
 	pthread_mutex_destroy(&socketMutx);			// Destroy socket's mutex
+	sem_destroy(&pbSem);					// Destroy phonebook semaphore 
 
 	for(int i = 0; i < workersNum; i++)			// For each worker
 	{
@@ -220,105 +230,122 @@ void DestroyWorkers(int workersNum, int threadNum, int busySemNum, int freeSemNu
 }
 
 
-// Analayzes request sent by client and generates a response to it
-void* HandleRequest(void* index)
+// Analyze request sent by client and generates a response to it
+void* HandleRequest(void* ptrToWorker)
 {
-	int i = (int) index;
-	Packet_t response;
-	printf("WORKER %d STARTED\n", i); // ==== DEBUG ====
+	Worker_t* me = (Worker_t*) ptrToWorker;
 
 	while(serverRunning == 1)
 	{
-		memset(&response, 0, sizeof(Packet_t));
-		sem_wait(&workers[i].isBusy);								// Wait until a request arrives from main thread
-		printf("THREAD %d IS HANDLING REQUEST: ", i); // ==== DEBUG ====
+		memset(&me->response, 0, sizeof(Packet_t));
+		sem_wait(&me->isBusy);								// Wait until a request arrives from main thread
+		sem_wait(&pbSem);								// Signal to everyone that we are operating on phonebook struct
 
-		if(CheckPermission(pb, workers[i].request.clientName, workers[i]. request.type) == 0)	// Check if client has permission to execute such request
+		//printf("THREAD %d IS HANDLING REQUEST: ", i); // ==== DEBUG ====
+
+		if(CheckPermission(pb, me->request.clientName, me->request.type) == 0)		// Check if client has permission to execute such request
 		{
-			strncpy(response.name, "You don't have permission", MAX_NAME_SIZE);		// If it does not send an error
-			response.type = REJECTED;
-			SendPacket(&response, &(workers[i].clientAddr), workers[i].addrLen);
-			sem_post(&workers[i].isFree);							// Signal to main thread that we are available to process a new request
+			strncpy(me->response.name, "You don't have permission", MAX_NAME_SIZE);	// If it does not send an error
+			me->response.type = REJECTED;
+			SendPacket(&me->response, &(me->clientAddr), me->addrLen);
+
+			sem_post(&me->isFree);							// Signal to main thread that we are available to process a new request
+			sem_post(&pbSem);							// Signal to everyone that our operation on phonebook is over
 			continue;
 		}
 
-		switch(workers[i].request.type)			// If it has permission then try to satisfy the request
+		switch(me->request.type)			// If it has permission then try to satisfy the request
 		{
 			case ADD_CONTACT:
-				printf("ADD_CONTACT, FROM: %s, NAME: %s, NUM: %s\n", workers[i].request.clientName, workers[i].request.name, workers[i].request.number);
+				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)				// Wait that all worker end their operations on phonebook struct
+					sem_wait(&pbSem);
 
-				if(AddContact(pb, workers[i].request.name, workers[i].request.number, 0, 1) == 0)
+				printf("ADD_CONTACT, FROM: %s, NAME: %s, NUM: %s\n", me->request.clientName, me->request.name, me->request.number);
+
+				if(AddContact(pb, me->request.name, me->request.number, 0, 1) == 0)
 				{
-					strncpy(response.name, "Add contact failed", MAX_NAME_SIZE);
-					response.type = REJECTED;
+					strncpy(me->response.name, "Add contact failed", MAX_NAME_SIZE);
+					me->response.type = REJECTED;
 				} else {
-					strncpy(response.name, "Added contact", MAX_NAME_SIZE);
-					response.type = ACCEPTED;
+					strncpy(me->response.name, "Added contact", MAX_NAME_SIZE);
+					me->response.type = ACCEPTED;
 				}
+
+				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)				// Signal to everyone that our write operation is over
+					sem_post(&pbSem);
+
 				break;
 
 			case GET_CONTACT:
 			{
-				printf("GET_CONTACT, FROM: %s, NAME: %s\n", workers[i].request.clientName, workers[i].request.name);
+				printf("GET_CONTACT, FROM: %s, NAME: %s\n", me->request.clientName, me->request.name);
 
-				BstNode_t* node = SearchNode(pb->dataTree, workers[i].request.name);
+				BstNode_t* node = SearchNode(pb->dataTree, me->request.name);
 				if(node == NULL)
 				{
-					strncpy(response.name, "Contact not found", MAX_NAME_SIZE);
-					response.type = REJECTED;
+					strncpy(me->response.name, "Contact not found", MAX_NAME_SIZE);
+					me->response.type = REJECTED;
 				} else {
-					strncpy(response.name, node->name, MAX_NAME_SIZE);
-					strncpy(response.number, node->number, MAX_PHONE_NUM_SIZE);
-					response.type = ACCEPTED;
+					strncpy(me->response.name, node->name, MAX_NAME_SIZE);
+					strncpy(me->response.number, node->number, MAX_PHONE_NUM_SIZE);
+					me->response.type = ACCEPTED;
 				}
 			}	break;
 
 			case REMOVE_CONTACT:
-				printf("REMOVE_CONTACT, FROM: %s, NAME: %s\n", workers[i].request.clientName, workers[i].request.name);
+				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)				// Wait that all worker end their operations on phonebook struct
+					sem_wait(&pbSem);
 
-				if(RemoveContact(pb, workers[i].request.name) == 0)
+				printf("REMOVE_CONTACT, FROM: %s, NAME: %s\n", me->request.clientName, me->request.name);
+
+				if(RemoveContact(pb, me->request.name) == 0)
 				{
-					strncpy(response.name, "Contact not found", MAX_NAME_SIZE);
-					response.type = REJECTED;
+					strncpy(me->response.name, "Contact not found", MAX_NAME_SIZE);
+					me->response.type = REJECTED;
 				} else {
-					strncpy(response.name, "Contact removed", MAX_NAME_SIZE);
-					response.type = ACCEPTED;
+					strncpy(me->response.name, "Contact removed", MAX_NAME_SIZE);
+					me->response.type = ACCEPTED;
 				}
+
+				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)				// Signal to everyone that our write operation is over
+					sem_post(&pbSem);
+
 				break;
 
 			case LOGIN:
 			{
-				printf("LOGIN, FROM: %s, NAME: %s, NUMBER: %s\n", workers[i].request.clientName, workers[i].request.name, workers[i].request.number);
+				printf("LOGIN, FROM: %s, NAME: %s, NUMBER: %s\n", me->request.clientName, me->request.name, me->request.number);
 
-				BstNode_t* node = SearchNode(pb->credentialsTree, workers[i].request.name);
+				BstNode_t* node = SearchNode(pb->credentialsTree, me->request.name);
 				if(node == NULL)
 				{
-					strncpy(response.name, "Username unrecognized", MAX_NAME_SIZE);
-					response.type = REJECTED;
+					strncpy(me->response.name, "Username unrecognized", MAX_NAME_SIZE);
+					me->response.type = REJECTED;
 				} else {
-					if(strncmp(workers[i].request.number, node->number, MAX_PASSWORD_SIZE) == 0)
+					if(strncmp(me->request.number, node->number, MAX_PASSWORD_SIZE) == 0)
 					{
-						strncpy(response.name, "Logged in", MAX_NAME_SIZE);
-						response.type = ACCEPTED;
+						strncpy(me->response.name, "Logged in", MAX_NAME_SIZE);
+						me->response.type = ACCEPTED;
 					} else {
-						strncpy(response.name, "Wrong password", MAX_NAME_SIZE);
-						response.type = REJECTED;
+						strncpy(me->response.name, "Wrong password", MAX_NAME_SIZE);
+						me->response.type = REJECTED;
 					}
 				}
 			}	break;
 
 			default:
-				printf(" INVALID REQUEST from: %s\n", workers[i].request.clientName);
-				strncpy(response.name, "Invalid request", MAX_NAME_SIZE);
-				response.type = REJECTED;
+				printf(" INVALID REQUEST from: %s\n", me->request.clientName);
+				strncpy(me->response.name, "Invalid request", MAX_NAME_SIZE);
+				me->response.type = REJECTED;
 				break;
 		}
 
 		pthread_mutex_lock(&socketMutx);
-		SendPacket(&response, &(workers[i].clientAddr), workers[i].addrLen);		// Send response packet
+		SendPacket(&me->response, &me->clientAddr, me->addrLen);			// Send response packet
 		pthread_mutex_unlock(&socketMutx);
 
-		sem_post(&workers[i].isFree);							// Signal to main thread that we are available to process a new request
+		sem_post(&pbSem);								// Signal to main thread that we completed our operation on phonebook struct
+		sem_post(&me->isFree);								// Signal to main thread that we are available to process a new request
 	}
 
 	return NULL;
