@@ -67,7 +67,8 @@ int AddContact(Phonebook_t* pb, const char* name, const char* number, size_t off
 	if(pb == NULL || name == NULL || number == NULL)
 		return 0;
 
-	if(AddNode(&(pb->dataTree), name, number, offset) == NULL)		// Try to add a new node to bst
+	BstNode_t* newNode = AddNode(&(pb->dataTree), name, number, offset);	// Try to add a new node to bst
+	if(newNode == NULL)
 		return 0;
 
 	if(writeOnFile == 1)							// If specified then write new contact on file
@@ -75,6 +76,7 @@ int AddContact(Phonebook_t* pb, const char* name, const char* number, size_t off
 		char newEntry[MAX_NAME_SIZE + MAX_PHONE_NUM_SIZE + 3];		// Create new entry
 		sprintf(newEntry, "%s%c%s\n", name, SEPARATOR_CHAR, number);
 		offset = lseek(pb->dataFd, 0, SEEK_CUR);			// Get cursor's position
+		newNode->offset = offset;					// Set offset of new node to curr position of cursor in data file
 		WriteEntryOnFile(pb->dataFd, newEntry);				// Write new entry on file
 	}
 	return 1;

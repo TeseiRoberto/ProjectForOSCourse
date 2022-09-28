@@ -257,7 +257,7 @@ void* HandleRequest(void* ptrToWorker)
 		switch(me->request.type)			// If it has permission then try to satisfy the request
 		{
 			case ADD_CONTACT:
-				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)				// Wait that all worker end their operations on phonebook struct
+				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)			// Wait that all workers end their operations on phonebook struct
 					sem_wait(&pbSem);
 
 				printf("ADD_CONTACT, FROM: %s, NAME: %s, NUM: %s\n", me->request.clientName, me->request.name, me->request.number);

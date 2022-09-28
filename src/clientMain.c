@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <netdb.h>
 
 #include <stdio.h>
@@ -112,7 +113,7 @@ int main(void)
 				}
 
 				AddContact(nameBuff, numBuff, response);
-				printf("Server says: %s\n", response);
+				printf("Server: %s\n", response);
 				break;
 
 			case '2':				// Send request to retrive a phone number
@@ -128,7 +129,7 @@ int main(void)
 				}
 
 				GetContact(nameBuff, response);
-				printf("Server says: %s\n", response);
+				printf("Server: %s\n", response);
 				break;
 
 			case '3':				// Send request to remove a contact
@@ -144,7 +145,7 @@ int main(void)
 				}
 
 				RemoveContact(nameBuff, response);
-				printf("Server says: %s\n", response);
+				printf("Server: %s\n", response);
 				break;
 
 			case '4':				// Send request to login
@@ -163,7 +164,7 @@ int main(void)
 				}
 
 				Login(nameBuff, numBuff, response);
-				printf("Server says: %s\n", response);
+				printf("Server: %s\n", response);
 				break;
 
 			case '5':				// Quit
@@ -224,6 +225,14 @@ int InitializeSocket(const char* address, const char* portNum, struct addrinfo**
 		return 0;
 	}
 
+	struct timeval timeout;					// Set timeout of 10 second for receive operations
+	timeout.tv_sec = 10;
+
+	if(setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval)) != 0)
+	{
+		fprintf(stderr, "Warning: cannot set timeout for receive operations... ");
+	}
+
 	printf("Socket ready!\n");
 	return 1;
 }
@@ -255,8 +264,15 @@ int ReceivePacket(Packet_t* pack)
 	if(clientSock == -1 || serverAddr == NULL || pack == NULL)
 		return 0;
 
+	errno = 0;
 	size_t bytesReceived = 0;
 	bytesReceived = recv(clientSock, pack, sizeof(Packet_t), 0);
+
+	if(errno == EAGAIN)					// If timeout occurred write an error message in pack
+	{
+		snprintf(pack->name, MAX_NAME_SIZE, "Server is not responding...");
+		return 0;
+	}
 
 	if(bytesReceived != sizeof(Packet_t))			// Check that a complete packet has been received
 	{
