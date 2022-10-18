@@ -11,8 +11,16 @@ BstNode_t* AddNode(BstNode_t** root, const char* name, const char* number, size_
 		return NULL;
 	}
 
-	memcpy(newNode->name, name, MAX_NAME_SIZE);
-	memcpy(newNode->number, number, MAX_PHONE_NUM_SIZE);
+	if(name != NULL)
+		memcpy(newNode->name, name, MAX_NAME_SIZE);
+	else
+		memset(newNode->name, '\0', MAX_NAME_SIZE);
+
+	if(number != NULL)
+		memcpy(newNode->number, number, MAX_PHONE_NUM_SIZE);
+	else
+		memset(newNode->number, '\0', MAX_PHONE_NUM_SIZE);
+
 	newNode->offset = offset;
 	newNode->leftChild = newNode->rightChild = NULL;
 

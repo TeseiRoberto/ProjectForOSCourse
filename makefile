@@ -10,7 +10,7 @@ CLIENT_TARGET = Client
 GUI_CLIENT_SOURCES = src/sGui.c src/Utility.c src/clientMain.c
 GUI_CLIENT_TARGET = GuiClient
 
-TESTER_SOURCES = src/tester.c
+TESTER_SOURCES = src/tester.c src/Utility.c
 TESTER_TARGET = Tester
 
 server:

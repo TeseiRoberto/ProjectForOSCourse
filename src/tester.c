@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include <unistd.h>
 #include <pthread.h>
@@ -12,6 +13,7 @@
 #include <netdb.h>
 
 #include "Constants.h"
+#include "Utility.h"
 #include "Packet.h"
 
 typedef struct _Tester {
@@ -23,8 +25,6 @@ typedef struct _Tester {
 
 
 int InitializeSocket(int* sock, const char* address, const char* portNum, struct addrinfo** addrStruct);
-int SendPacket(int sock, Packet_t* pack);
-int ReceivePacket(int sock, Packet_t* pack);
 
 int InitializeTesters(Tester_t** testers, int threadNum, int getReqNum, int addReqNum, int removeReqNum);
 void DestroyTesters(Tester_t** testers, int testerNum);
@@ -47,23 +47,16 @@ sem_t startSem;				// Semaphore to enable begin of simulation
 
 int main(int argc, char* argv[])
 {
-	if(argc != 5)
+	if(argc != 4)
 	{
-		fprintf(stderr, "usage is: %s <clients num> <get request num> <add request num> <remove request num>\n", argv[0]);
+		fprintf(stderr, "usage is: %s <get request num> <add request num> <remove request num>\n", argv[0]);
 		exit(-1);
 	}
 
-	int testersNum = (int) strtol(argv[1], NULL, 10);
-	int getReqNum = (int) strtol(argv[2], NULL, 10);	// Num of tester that will simulate a GET_CONTACT request
-	int addReqNum = (int) strtol(argv[3], NULL, 10);	// Num of tester that will simulate a ADD_CONTACT request
-	int removeReqNum = (int) strtol(argv[4], NULL, 10);	// Num of tester that will simulate a REMOVE_CONTACT request
-
-	// Check that for all clients that will be simulated thre is a request type
-	if((getReqNum + addReqNum + removeReqNum) != testersNum)
-	{
-		fprintf(stderr, "Error: getRequestNum + addRequestNum + removeRequestNum must be equal to clientsNum\n");
-		exit(-1);
-	}
+	int getReqNum = (int) strtol(argv[1], NULL, 10);	// Num of tester that will simulate a GET_CONTACT request
+	int addReqNum = (int) strtol(argv[2], NULL, 10);	// Num of tester that will simulate a ADD_CONTACT request
+	int removeReqNum = (int) strtol(argv[3], NULL, 10);	// Num of tester that will simulate a REMOVE_CONTACT request
+	int testersNum = getReqNum + addReqNum + removeReqNum;
 
 	// Check that hardcoded arrays (toSearch, toAdd and toRemove) have enough elements to simulate requests
 	if(getReqNum > (int)(sizeof(toSearch) / sizeof(char*)) || addReqNum > (int)(sizeof(toAdd) / sizeof(char*)) || removeReqNum > (int)(sizeof(toRemove) / sizeof(char*)))
@@ -126,42 +119,11 @@ int InitializeSocket(int* sock, const char* address, const char* portNum, struct
 		fprintf(stderr, "Error: cannot create socket for tester...\n");
 		return 0;
 	}
-	return 1;
-}
 
+	struct timeval timeout;					// Set timeout of 10 second for receive operations
+	timeout.tv_sec = 10;
 
-// Send given packet to server using specified socket
-int SendPacket(int sock, Packet_t* pack)
-{
-	if(sock == -1 || serverAddr == NULL || pack == NULL)
-		return 0;
-
-	int bytesSent = 0;
-	bytesSent = sendto(sock, pack, sizeof(Packet_t), 0, serverAddr->ai_addr, serverAddr->ai_addrlen);
-
-	if(bytesSent != sizeof(Packet_t))			// Check that all packet is been sent
-	{
-		return 0;
-	}
-
-	return 1;
-}
-
-
-// Fills given packet with response from server
-int ReceivePacket(int sock, Packet_t* pack)
-{
-	if(sock == -1 || serverAddr == NULL || pack == NULL)
-		return 0;
-
-	size_t bytesReceived = 0;
-	bytesReceived = recv(sock, pack, sizeof(Packet_t), 0);
-
-	if(bytesReceived != sizeof(Packet_t))			// Check that a complete packet is been received
-	{
-		return 0;
-	}
-
+	setsockopt(*sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval)); 
 	return 1;
 }
 
@@ -187,9 +149,9 @@ int InitializeTesters(Tester_t** testers, int testerNum, int getReqNum, int addR
 		return 0;
 	}
 
-	int getReqMade = 0;		// Keeps track of how many GET_CONTACT request we made and is used as index for toSearch string array
-	int addReqMade = 0;		// Keeps track of how many ADD_CONTACT request we made and is used as index for toAdd string array
-	int removeReqMade = 0;		// Keeps track of how many REMOVE_CONTACT request we made and is used as index for toRemove string array
+	int getReqMade = 0;		// Keeps track of how many GET_CONTACT request we made (NOTE: is used as index for toSearch string array)
+	int addReqMade = 0;		// Keeps track of how many ADD_CONTACT request we made (NOTE: is used as index for toAdd string array)
+	int removeReqMade = 0;		// Keeps track of how many REMOVE_CONTACT request we made (NOTE: is used as index for toRemove string array)
 
 	for(int i = 0; i < testerNum; i++)				// For each tester in the array
 	{
@@ -233,28 +195,45 @@ int InitializeTesters(Tester_t** testers, int testerNum, int getReqNum, int addR
 			return 0;
 		}
 
-		if(getReqMade < getReqNum)					// Choose a request type to simulate with curr tester
+		// This switch is used to set the request type for the current Tester_t, in particular we want to send requests in order such as
+		// GET, ADD and REMOVE so that we test the server capability in handling read and write request in a mixed order
+		switch(i % 3)
 		{
-			curr->request.type = GET_CONTACT;
-			strncpy(curr->request.name, toSearch[getReqMade], MAX_NAME_SIZE);	// Set name in packet
-			getReqMade++;
-
-		} else if(addReqMade < addReqNum)
-		{
-			curr->request.type = ADD_CONTACT;
-			strncpy(curr->request.name, toAdd[addReqMade], MAX_NAME_SIZE);		// Set name in packet
-			strncpy(curr->request.number, "1234567890", MAX_PHONE_NUM_SIZE);	// Set number in packet
-			addReqMade++;
-
-		} else if(removeReqMade < removeReqNum)
-		{
-			curr->request.type = REMOVE_CONTACT;
-			strncpy(curr->request.name, toRemove[removeReqMade], MAX_NAME_SIZE);	// Set name in packet
-			removeReqMade++;
+			case 0:
+				TRY_ANOTHER_REQUEST:
+				if(getReqMade < getReqNum)
+				{
+					curr->request.type = GET_CONTACT;
+					strncpy(curr->request.name, toSearch[getReqMade], MAX_NAME_SIZE);
+					getReqMade++;
+					break;
+				}
+				// Fallthrough
+			case 1:
+				if(addReqMade < addReqNum)
+				{
+					curr->request.type = ADD_CONTACT;
+					strncpy(curr->request.name, toAdd[addReqMade], MAX_NAME_SIZE);		// Set name in packet
+					strncpy(curr->request.number, "1234567890", MAX_PHONE_NUM_SIZE);	// Set number in packet
+					addReqMade++;
+					break;
+				}
+				// Fallthrough
+			case 2:
+				if(removeReqMade < removeReqNum)
+				{
+					curr->request.type = REMOVE_CONTACT;
+					strncpy(curr->request.name, toRemove[removeReqMade], MAX_NAME_SIZE);	// Set name in packet
+					removeReqMade++;
+					break;
+				}
+				goto TRY_ANOTHER_REQUEST;
+				break;
+		
 		}
 	}
 
-	printf("Testers are ready\n");
+	printf("Testers are ready!\n");
 	return 1;
 }
 
@@ -287,7 +266,7 @@ void* SimulateRequest(void* tester)
 	Tester_t* me = (Tester_t*) tester;
 	sem_wait(&startSem);					// Wait main thread to enable simulation
 
-	if(SendPacket(me->sock, &me->request) == 0)		// Try to send request
+	if(SendPacket(me->sock, &me->request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
 	{
 		snprintf(me->response.name, MAX_NAME_SIZE, "Thread has failed to send request...\n");
 		return NULL;
@@ -314,19 +293,19 @@ void PrintResults(Tester_t* testers, int testerNum)
 		switch(testers[i].request.type)
 		{
 			case GET_CONTACT:
-				printf("Thread %d] Request: GET_CONTACT, response is name: %s, number: %s\n", i + 1, testers[i].response.name, testers[i].response.number);
+				printf("Thread %d] Request was: ( GET_CONTACT, %s ) Response is ( %s, %s )\n", i + 1, testers[i].request.name, testers[i].response.name, testers[i].response.number);
 				break;
 
 			case ADD_CONTACT:
-				printf("Thread %d] Request: ADD_CONTACT, reponse is: %s\n", i + 1, testers[i].response.name);
+				printf("Thread %d] Request was: ( ADD_CONTACT, %s, %s ) Reponse is: ( %s )\n", i + 1, testers[i].request.name, testers[i].request.number, testers[i].response.name);
 				break;
 
 			case REMOVE_CONTACT:
-				printf("Thread %d] Request: REMOVE_CONTACT, reponse is: %s\n", i + 1, testers[i].response.name);
+				printf("Thread %d] Request was: ( REMOVE_CONTACT, %s ) Reponse is: ( %s )\n", i + 1, testers[i].request.name, testers[i].response.name);
 				break;
 
 			default:
-				printf("Thread %d] Request UNDEFINED\n", i + 1);
+				printf("Thread %d] Request was ( UNDEFINED )\n", i + 1);
 				break;
 		}
 	}

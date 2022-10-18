@@ -34,7 +34,7 @@ How to use sGui:
 
 NOTE on sGui usage:
 	- You should not instatiate GraphicContext_t, Window_t or Widget_t explicitly, in your program you should only have pointers
-	to this types and manage those using the functions provided by the API.
+	to those types and manage them using functions provided by the API.
 
 	- sGui allocates dynamically all his structures, this may not be what you want. The idea behind this approach is that you
 	create the gui interface of the program before doing everything else so all the allocation will be made upfront when the program

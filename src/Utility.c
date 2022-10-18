@@ -65,3 +65,47 @@ int IsPermissionsValid(const char* perm)
 	return 0;
 }
 
+
+// Uses sock to send pack to specified address, returns 0 on failure 1 otherwise
+int SendPacket(int sock, Packet_t* pack, struct sockaddr_in* addr, socklen_t addrLen)
+{
+	if(sock == -1 || pack == NULL || addr == NULL)
+		return 0;
+
+	size_t bytesSent = 0;
+	bytesSent = sendto(sock, pack, sizeof(Packet_t), 0, (struct sockaddr*) addr, addrLen);
+
+	if(bytesSent != sizeof(Packet_t))			// Check that right amount of data has been sent
+	{
+		return 0;
+	}
+
+	return 1;
+}
+
+
+// Uses sock to receive data that will be stored in specified packet
+int ReceivePacket(int sock, Packet_t* pack)
+{
+	if(sock == -1 || pack == NULL)
+		return 0;
+
+	errno = 0;
+	size_t bytesReceived = 0;
+
+	bytesReceived = recv(sock, pack, sizeof(Packet_t), 0);
+
+	if(errno == EAGAIN)					// Check if timeout occurred
+	{
+		snprintf(pack->name, MAX_NAME_SIZE, "Timeout error...");
+		return 0;
+	}
+
+	if(bytesReceived != sizeof(Packet_t))			// Check if we received the right amount of data
+	{
+		snprintf(pack->name, MAX_NAME_SIZE, "Received corrupted packet...");
+		return 0;
+	}
+
+	return 1;
+}

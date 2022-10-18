@@ -29,12 +29,12 @@ typedef struct _Worker {
 
 
 int InitializeSocket(const char* portNum);
-void SendPacket(Packet_t* pack, struct sockaddr_in* clientAddr, socklen_t addrLen);
-
 int InitializeWorkers(int workersNum);
 void DestroyWorkers(int workersNum, int threadNum, int busySemNum, int freeSemNum);
 void* HandleRequest(void* ptrToWorker);
+void SigIntHandler(int dummy);
 void Shell();
+
 
 Phonebook_t* pb = NULL;				// Global instance of phonebook struct
 int serverRunning = 1;				// Indicates if server is active
@@ -48,6 +48,7 @@ int main(int argc, char* argv[])
 	if(argc != 3)
 	{
 		fprintf(stderr, "usage is: %s <phonebook data filename> <credentials data filename>\n", argv[0]);
+		fprintf(stderr, "If this is the first use files will be created automatically, just choose a name\n");
 		return -1;
 	}
 
@@ -55,7 +56,7 @@ int main(int argc, char* argv[])
 	if(pb == NULL)						// Check if creation failed
 		exit(-1);
 
-	if(InitializeWorkers(MAX_CLIENT_NUM) == 0)		// Initialize all threads, data and synch mechanism
+	if(InitializeWorkers(MAX_CLIENT_NUM) == 0)		// Initialize all threads, data and synch mechanisms
 	{
 		DestroyPhonebook(&pb);
 		exit(-1);
@@ -68,13 +69,11 @@ int main(int argc, char* argv[])
 		exit(-1);
 	}
 
-	// Start of debug code ==========
 	struct sigaction intHandler;
-	intHandler.sa_handler = Shell;
+	intHandler.sa_handler = SigIntHandler;
+	//intHandler.sa_handler = Shell;			// Uncomment to enable shell function for debug purpouses 
 	intHandler.sa_flags = 0;
-	
-	sigaction(SIGINT, &intHandler, NULL);			// Set signal to open server shell
-	// End of debug code ===========
+	sigaction(SIGINT, &intHandler, NULL);			// Set callback function for SIG_INT
 
 	printf("\nWaiting for clients...\n");
 
@@ -144,16 +143,6 @@ int InitializeSocket(const char* portNum)
 	freeaddrinfo(serverAddr);				// Server address is not required anymore
 	printf("Socket ready!\n");
 	return 1;
-}
-
-
-// Sends a packet to the specified client
-void SendPacket(Packet_t* pack, struct sockaddr_in* clientAddr, socklen_t addrLen)
-{
-	if(serverSock == -1 || pack == NULL || clientAddr == NULL)
-		return;
-
-	sendto(serverSock, pack, sizeof(Packet_t), 0, (struct sockaddr*) clientAddr, addrLen);
 }
 
 
@@ -235,32 +224,33 @@ void* HandleRequest(void* ptrToWorker)
 {
 	Worker_t* me = (Worker_t*) ptrToWorker;
 
+	if(me == NULL)
+		return NULL;
+
 	while(serverRunning == 1)
 	{
 		memset(&me->response, 0, sizeof(Packet_t));
 		sem_wait(&me->isBusy);								// Wait until a request arrives from main thread
 		sem_wait(&pbSem);								// Signal to everyone that we are operating on phonebook struct
 
-		//printf("THREAD %d IS HANDLING REQUEST: ", i); // ==== DEBUG ====
-
 		if(CheckPermission(pb, me->request.clientName, me->request.type) == 0)		// Check if client has permission to execute such request
 		{
 			strncpy(me->response.name, "You don't have permission", MAX_NAME_SIZE);	// If it does not send an error
 			me->response.type = REJECTED;
-			SendPacket(&me->response, &(me->clientAddr), me->addrLen);
+			SendPacket(serverSock, &me->response, &(me->clientAddr), me->addrLen);
 
 			sem_post(&me->isFree);							// Signal to main thread that we are available to process a new request
 			sem_post(&pbSem);							// Signal to everyone that our operation on phonebook is over
 			continue;
 		}
 
-		switch(me->request.type)			// If it has permission then try to satisfy the request
+		switch(me->request.type)							// If it has permission then try to satisfy the request
 		{
 			case ADD_CONTACT:
-				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)			// Wait that all workers end their operations on phonebook struct
+				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)			// Wait all workers to end their operations on phonebook struct
 					sem_wait(&pbSem);
 
-				printf("ADD_CONTACT, FROM: %s, NAME: %s, NUM: %s\n", me->request.clientName, me->request.name, me->request.number);
+				printf("ADD_CONTACT REQUEST, from: %s, name: %s, num: %s\n", me->request.clientName, me->request.name, me->request.number);
 
 				if(AddContact(pb, me->request.name, me->request.number, 0, 1) == 0)
 				{
@@ -278,7 +268,7 @@ void* HandleRequest(void* ptrToWorker)
 
 			case GET_CONTACT:
 			{
-				printf("GET_CONTACT, FROM: %s, NAME: %s\n", me->request.clientName, me->request.name);
+				printf("GET_CONTACT REQUEST from: %s, name: %s\n", me->request.clientName, me->request.name);
 
 				BstNode_t* node = SearchNode(pb->dataTree, me->request.name);
 				if(node == NULL)
@@ -293,10 +283,10 @@ void* HandleRequest(void* ptrToWorker)
 			}	break;
 
 			case REMOVE_CONTACT:
-				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)				// Wait that all worker end their operations on phonebook struct
+				for(int i = 0; i < (MAX_CLIENT_NUM - 1); i++)				// Wait all workers to end their operations on phonebook struct
 					sem_wait(&pbSem);
 
-				printf("REMOVE_CONTACT, FROM: %s, NAME: %s\n", me->request.clientName, me->request.name);
+				printf("REMOVE_CONTACT REQUEST from: %s, name: %s\n", me->request.clientName, me->request.name);
 
 				if(RemoveContact(pb, me->request.name) == 0)
 				{
@@ -314,7 +304,7 @@ void* HandleRequest(void* ptrToWorker)
 
 			case LOGIN:
 			{
-				printf("LOGIN, FROM: %s, NAME: %s, NUMBER: %s\n", me->request.clientName, me->request.name, me->request.number);
+				printf("LOGIN REQUEST from: %s, name: %s, number: %s\n", me->request.clientName, me->request.name, me->request.number);
 
 				BstNode_t* node = SearchNode(pb->credentialsTree, me->request.name);
 				if(node == NULL)
@@ -334,14 +324,14 @@ void* HandleRequest(void* ptrToWorker)
 			}	break;
 
 			default:
-				printf(" INVALID REQUEST from: %s\n", me->request.clientName);
+				printf(" INVALID REQUEST form: %s\n", me->request.clientName);
 				strncpy(me->response.name, "Invalid request", MAX_NAME_SIZE);
 				me->response.type = REJECTED;
 				break;
 		}
 
 		pthread_mutex_lock(&socketMutx);
-		SendPacket(&me->response, &me->clientAddr, me->addrLen);			// Send response packet
+		SendPacket(serverSock, &me->response, &me->clientAddr, me->addrLen);			// Send response packet
 		pthread_mutex_unlock(&socketMutx);
 
 		sem_post(&pbSem);								// Signal to main thread that we completed our operation on phonebook struct
@@ -352,7 +342,21 @@ void* HandleRequest(void* ptrToWorker)
 }
 
 
-// Enables user to enter commands to manage server
+// Callback function for SIG_INT
+void SigIntHandler(int dummy)
+{
+	DestroyWorkers(MAX_CLIENT_NUM, MAX_CLIENT_NUM, MAX_CLIENT_NUM, MAX_CLIENT_NUM);
+	close(serverSock);
+	DestroyPhonebook(&pb);
+	exit(0);
+}
+
+
+// Shell function was used during development to verify that the system was working properly, it enables the user to enter 
+// commands to manage the server. The function can be activated by uncommenting line 74 and pressing ctrl-c during runtime.
+// This function is purpousely NOT thread safe due to the fact that was used mainly to check the integrity of internal 
+// data structures AFTER a series of requests from clients. I decided to leave it only for future debug and should not 
+// be considered as part of the "release code"
 void Shell()
 {
 	char commandBuff[32];

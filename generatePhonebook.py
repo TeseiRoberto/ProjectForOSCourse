@@ -34,7 +34,7 @@ def GeneratePhoneNumber(length):
 def GeneratePhonebook():
 
 	if len(sys.argv) != 3:
-		print("usage is: " + sys.argv[0] + "<filename> <number of elements>")
+		print("usage is: " + sys.argv[0] + " <filename> <number of elements>")
 		return;
 
 	random.seed();

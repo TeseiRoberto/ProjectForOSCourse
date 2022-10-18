@@ -12,16 +12,17 @@
 
 #include "Packet.h"
 #include "Utility.h"
+#include "Constants.h"
 
 #ifdef USE_GUI
 	#include "sGui.h"
-	void AddBtn(Widget_t* widget, void* dummy);			// Prototypes for widget's callback functions
-	void GetBtn(Widget_t* widget, void* dummy);
-	void RemoveBtn(Widget_t* widget, void* dummy);
-	void LoginBtn(Widget_t* widget, void* dummy);
+	void AddBtn(Widget_t* widget, __attribute__((unused)) void* dummy);	// Prototypes for widget's callback functions
+	void GetBtn(Widget_t* widget, __attribute__((unused)) void* dummy);
+	void RemoveBtn(Widget_t* widget, __attribute__((unused)) void* dummy);
+	void LoginBtn(Widget_t* widget, __attribute__((unused)) void* dummy);
 
-	void BtnOnHover(Widget_t* widget, void* dummy);
-	void BtnOnOutHover(Widget_t* widget, void* dummy);
+	void BtnOnHover(Widget_t* widget, __attribute__((unused)) void* dummy);
+	void BtnOnOutHover(Widget_t* widget, __attribute__((unused)) void* dummy);
 
 	Widget_t* nameField = NULL;					// Global variables to store widgets
 	Widget_t* numField = NULL;
@@ -32,8 +33,6 @@
 #endif
 
 int InitializeSocket(const char* address, const char* portNum, struct addrinfo** addrStruct);
-int SendPacket(Packet_t* pack);
-int ReceivePacket(Packet_t* pack);
 
 int AddContact(char* name, char* number, char* response);
 int GetContact(char* name, char* response);
@@ -46,8 +45,7 @@ char username[MAX_NAME_SIZE];					// Username used to make request to server
 
 int main(void)
 {
-	//strncpy(username, "user", MAX_NAME_SIZE);		// Set default username
-	strncpy(username, "admin", MAX_NAME_SIZE); // ==== DEBUG ====
+	strncpy(username, "user", MAX_NAME_SIZE);		// Set default username
 
 	if(InitializeSocket(LOCAL_ADDRESS, SERVER_PORT_NUM, &serverAddr) == 0)
 		exit(-1);
@@ -64,7 +62,7 @@ int main(void)
 	// Create all widgets
 	sgui_CreateWidget(mainWnd, SGUI_BUTTON, "getBtn", 16, 400, 100, 50, "Get contact", 	sgui_Rgb(0, 120, 0), sgui_Rgb(0, 120, 0), SGUI_WHITE, SGUI_WHITE, GetBtn, BtnOnHover, BtnOnOutHover, NULL);
 	sgui_CreateWidget(mainWnd, SGUI_BUTTON, "addBtn", 132, 400, 100, 50, "Add contact", 	sgui_Rgb(0, 120, 0), sgui_Rgb(0, 120, 0), SGUI_WHITE, SGUI_WHITE, AddBtn, BtnOnHover, BtnOnOutHover, NULL);
-	sgui_CreateWidget(mainWnd, SGUI_BUTTON, "remBtn", 248, 400, 100, 50, "remove contact", 	sgui_Rgb(0, 120, 0), sgui_Rgb(0, 120, 0), SGUI_WHITE, SGUI_WHITE, RemoveBtn, BtnOnHover, BtnOnOutHover, NULL);
+	sgui_CreateWidget(mainWnd, SGUI_BUTTON, "remBtn", 248, 400, 100, 50, "Remove contact", 	sgui_Rgb(0, 120, 0), sgui_Rgb(0, 120, 0), SGUI_WHITE, SGUI_WHITE, RemoveBtn, BtnOnHover, BtnOnOutHover, NULL);
 	sgui_CreateWidget(mainWnd, SGUI_BUTTON, "logBtn", 364, 400, 100, 50, "Login", 		sgui_Rgb(0, 120, 0), sgui_Rgb(0, 120, 0), SGUI_WHITE, SGUI_WHITE, LoginBtn, BtnOnHover, BtnOnOutHover, NULL);
 
 	nameField = sgui_CreateWidget(mainWnd, SGUI_TEXTFIELD, "nameField", 100, 20, 300, 60, "", SGUI_BLACK, SGUI_WHITE, SGUI_BLACK, SGUI_BLACK, NULL, NULL, NULL, NULL);
@@ -113,7 +111,7 @@ int main(void)
 				}
 
 				AddContact(nameBuff, numBuff, response);
-				printf("Server: %s\n", response);
+				printf("[Server] ==> %s\n", response);
 				break;
 
 			case '2':				// Send request to retrive a phone number
@@ -129,7 +127,7 @@ int main(void)
 				}
 
 				GetContact(nameBuff, response);
-				printf("Server: %s\n", response);
+				printf("[Server] ==> %s\n", response);
 				break;
 
 			case '3':				// Send request to remove a contact
@@ -145,7 +143,7 @@ int main(void)
 				}
 
 				RemoveContact(nameBuff, response);
-				printf("Server: %s\n", response);
+				printf("[Server] ==> %s\n", response);
 				break;
 
 			case '4':				// Send request to login
@@ -164,15 +162,11 @@ int main(void)
 				}
 
 				Login(nameBuff, numBuff, response);
-				printf("Server: %s\n", response);
+				printf("[Server] ==> %s\n", response);
 				break;
 
 			case '5':				// Quit
 				printf("Quitting...\n");
-				break;
-
-			case '6':
-				printf("\e[2J");
 				break;
 
 			default:
@@ -230,7 +224,7 @@ int InitializeSocket(const char* address, const char* portNum, struct addrinfo**
 
 	if(setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval)) != 0)
 	{
-		fprintf(stderr, "Warning: cannot set timeout for receive operations... ");
+		fprintf(stderr, "Warning: cannot set timeout for receive operations on socket... ");
 	}
 
 	printf("Socket ready!\n");
@@ -238,56 +232,12 @@ int InitializeSocket(const char* address, const char* portNum, struct addrinfo**
 }
 
 
-// Uses clientSock to send given packet to serverAddr
-int SendPacket(Packet_t* pack)
-{
-	if(clientSock == -1 || serverAddr == NULL || pack == NULL)
-		return 0;
-
-	int bytesSent = 0;
-	bytesSent = sendto(clientSock, pack, sizeof(Packet_t), 0, serverAddr->ai_addr, serverAddr->ai_addrlen);
-
-	if(bytesSent != sizeof(Packet_t))			// Check that all packet has been sent
-	{
-		printf("Failed to send request...\n"); // ==== DEBUG ====
-		return 0;
-	}
-
-	printf("Request sent!\n");// ==== DEBUG ====
-	return 1;
-}
-
-
-// Use clientSock to receive a packet from server and store it's content in given packet
-int ReceivePacket(Packet_t* pack)
-{
-	if(clientSock == -1 || serverAddr == NULL || pack == NULL)
-		return 0;
-
-	errno = 0;
-	size_t bytesReceived = 0;
-	bytesReceived = recv(clientSock, pack, sizeof(Packet_t), 0);
-
-	if(errno == EAGAIN)					// If timeout occurred write an error message in pack
-	{
-		snprintf(pack->name, MAX_NAME_SIZE, "Server is not responding...");
-		return 0;
-	}
-
-	if(bytesReceived != sizeof(Packet_t))			// Check that a complete packet has been received
-	{
-		printf("Failed to receive response...\n");// ==== DEBUG ====
-		return 0;
-	}
-
-	printf("Received a response from server\n");// ==== DEBUG ====
-	return 1;
-}
-
-
 // Creates a packet that request to add a new contact with given parameters, and then send it to server
 int AddContact(char* name, char* number, char* response)
 {
+	if(name == NULL || number == NULL || response == NULL)
+		return 0;
+
 	Packet_t request;
 	Packet_t serverResponse;
 	memset(&request, 0, sizeof(Packet_t));
@@ -297,15 +247,15 @@ int AddContact(char* name, char* number, char* response)
 	strncpy(request.name, name, MAX_NAME_SIZE);		// Copy contact name in packet
 	strncpy(request.number, number, MAX_PHONE_NUM_SIZE);	// Copy contact number in packet
 	
-	if(SendPacket(&request) == 0)				// Try to send request to server
+	if(SendPacket(clientSock, &request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
 	{
 		snprintf(response, MAX_RESPONSE_SIZE, "Failed to send request...");
 		return 0;
 	}
 
-	if(ReceivePacket(&serverResponse) == 0)			// Try to receive a packet
+	if(ReceivePacket(clientSock, &serverResponse) == 0)	// Try to receive a response
 	{
-		snprintf(response, MAX_RESPONSE_SIZE, "Failed to receive response...");
+		snprintf(response, MAX_RESPONSE_SIZE, "%s", serverResponse.name);
 		return 0;
 	}
 
@@ -317,6 +267,9 @@ int AddContact(char* name, char* number, char* response)
 // Creates a packet that request to get number of a contact with given name, and then send it to server
 int GetContact(char* name, char* response)
 {
+	if(name == NULL || response == NULL)
+		return 0;
+
 	Packet_t request;
 	Packet_t serverResponse;
 	memset(&request, 0, sizeof(Packet_t));
@@ -325,32 +278,35 @@ int GetContact(char* name, char* response)
 	strncpy(request.clientName, username, MAX_NAME_SIZE);	// Copy client name in packet
 	strncpy(request.name, name, MAX_NAME_SIZE);		// Copy contact name in packet
 
-	if(SendPacket(&request) == 0)				// Try to send request to server
+	if(SendPacket(clientSock, &request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
 	{
 		snprintf(response, MAX_RESPONSE_SIZE, "Failed to send request...");
 		return 0;
 	}
 
-	if(ReceivePacket(&serverResponse) == 0)			// Try to receive a packet
+	if(ReceivePacket(clientSock, &serverResponse) == 0)	// Try to receive a response
 	{
-		snprintf(response, MAX_RESPONSE_SIZE, "Failed to receive response...");
+		snprintf(response, MAX_RESPONSE_SIZE, "%s", serverResponse.name);
 		return 0;
 	}
 
-	if(serverResponse.type == ACCEPTED)
+	if(serverResponse.type == REJECTED)
 	{
-		snprintf(response, MAX_RESPONSE_SIZE, "name: %s, number: %s", serverResponse.name, serverResponse.number);
-		return 1;
+		snprintf(response, MAX_RESPONSE_SIZE, "%s", serverResponse.name);
+		return 0;
 	}
 
-	snprintf(response, MAX_RESPONSE_SIZE, "%s", serverResponse.name);
-	return 0;
+	snprintf(response, MAX_RESPONSE_SIZE, "name: %s, number: %s", serverResponse.name, serverResponse.number);
+	return 1;
 }
 
 
 // Creates a packet that request to remove the contact with given name, and then send it to server
 int RemoveContact(char* name, char* response)
 {
+	if(name == NULL || response == NULL)
+		return 0;
+
 	Packet_t request;
 	Packet_t serverResponse;
 	memset(&request, 0, sizeof(Packet_t));
@@ -359,15 +315,15 @@ int RemoveContact(char* name, char* response)
 	strncpy(request.clientName, username, MAX_NAME_SIZE);			// Copy client name in packet
 	strncpy(request.name, name, MAX_NAME_SIZE);				// Copy contact name in packet
 	
-	if(SendPacket(&request) == 0)						// Try to send request to server
+	if(SendPacket(clientSock, &request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
 	{
 		snprintf(response, MAX_RESPONSE_SIZE, "Failed to send request...");
 		return 0;
 	}
 
-	if(ReceivePacket(&serverResponse) == 0)					// Try to receive a packet
+	if(ReceivePacket(clientSock, &serverResponse) == 0)			// Try to receive a response
 	{
-		snprintf(response, MAX_RESPONSE_SIZE, "Failed to receive response");
+		snprintf(response, MAX_RESPONSE_SIZE, "%s", serverResponse.name);
 		return 0;
 	}
 
@@ -379,6 +335,9 @@ int RemoveContact(char* name, char* response)
 // Creates a packet that request to login  with given parameters, and then send it to server
 int Login(char* user, char* password, char* response)
 {
+	if(user == NULL || password == NULL || response == NULL)
+		return 0;
+
 	Packet_t request;
 	Packet_t serverResponse;
 	memset(&request, 0, sizeof(Packet_t));
@@ -388,34 +347,34 @@ int Login(char* user, char* password, char* response)
 	strncpy(request.name, user, MAX_NAME_SIZE);		// Copy user in packet
 	strncpy(request.number, password, MAX_PASSWORD_SIZE);	// Copy client's password in packet
 	
-	if(SendPacket(&request) == 0)				// Try to send request to server
+	if(SendPacket(clientSock, &request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
 	{
 		snprintf(response, MAX_RESPONSE_SIZE, "Failed to send request...");
 		return 0;
 	}
 
-	if(ReceivePacket(&serverResponse) == 0)			// Try to receive a packet
+	if(ReceivePacket(clientSock, &serverResponse) == 0)	// Try to receive a response
 	{
-		snprintf(response, MAX_RESPONSE_SIZE, "Failed to receive response...");
+		snprintf(response, MAX_RESPONSE_SIZE, "%s", serverResponse.name);
 		return 0;
 	}
 
-	if(serverResponse.type == ACCEPTED)			// If login request has been accepted
+	if(serverResponse.type == REJECTED)			// If login request has been rejected
 	{
-		strncpy(username, user, MAX_NAME_SIZE); 	// Set new username
-		snprintf(response, MAX_RESPONSE_SIZE, "Logged as %s", username);
-		return 1;
+		snprintf(response, MAX_RESPONSE_SIZE, "%s", serverResponse.name);
+		return 0;
 	}
 
-	snprintf(response, MAX_RESPONSE_SIZE, "%s", serverResponse.name);
-	return 0;
+	strncpy(username, user, MAX_NAME_SIZE); 		// Set new username
+	snprintf(response, MAX_RESPONSE_SIZE, "Logged as %s", username);
+	return 1;
 }
 
 
 #ifdef USE_GUI
 
 // Called when user clicks on add contact button
-void AddBtn(Widget_t* widget, void* dummy)
+void AddBtn(Widget_t* widget, __attribute__((unused)) void* dummy)
 {
 	if(IsNameValid(sgui_GetWidgetText(nameField), MAX_NAME_SIZE) == 0 || IsNumberValid(sgui_GetWidgetText(numField), MAX_PHONE_NUM_SIZE) == 0)
 	{
@@ -430,7 +389,7 @@ void AddBtn(Widget_t* widget, void* dummy)
 
 
 // Called when user clicks on add contact button
-void GetBtn(Widget_t* widget, void* dummy)
+void GetBtn(Widget_t* widget, __attribute__((unused)) void* dummy)
 {
 	if(IsNameValid(sgui_GetWidgetText(nameField), MAX_NAME_SIZE) == 0)
 	{
@@ -445,7 +404,7 @@ void GetBtn(Widget_t* widget, void* dummy)
 
 
 // Called when user clicks on add contact button
-void RemoveBtn(Widget_t* widget, void* dummy)
+void RemoveBtn(Widget_t* widget, __attribute__((unused)) void* dummy)
 {
 	if(IsNameValid(sgui_GetWidgetText(nameField), MAX_NAME_SIZE) == 0)
 	{
@@ -459,7 +418,7 @@ void RemoveBtn(Widget_t* widget, void* dummy)
 
 
 // Called when user clicks on add contact button
-void LoginBtn(Widget_t* widget, void* dummy)
+void LoginBtn(Widget_t* widget, __attribute__((unused)) void* dummy)
 {
 	if(IsNameValid(sgui_GetWidgetText(nameField), MAX_NAME_SIZE) == 0 || IsNumberValid(sgui_GetWidgetText(numField), MAX_PASSWORD_SIZE) == 0)
 	{
@@ -475,14 +434,14 @@ void LoginBtn(Widget_t* widget, void* dummy)
 
 
 // Called when user clicks on add contact button
-void BtnOnHover(Widget_t* widget, void* dummy)
+void BtnOnHover(Widget_t* widget, __attribute__((unused)) void* dummy)
 {
 	sgui_SetWidgetColor(widget, sgui_Rgb(0, 200, 0), sgui_Rgb(0, 200, 0), SGUI_WHITE, SGUI_WHITE);
 }
 
 
 // Called when user clicks on add contact button
-void BtnOnOutHover(Widget_t* widget, void* dummy)
+void BtnOnOutHover(Widget_t* widget, __attribute__((unused)) void* dummy)
 {
 	sgui_SetWidgetColor(widget, sgui_Rgb(0, 120, 0), sgui_Rgb(0, 120, 0), SGUI_WHITE, SGUI_WHITE);
 }
