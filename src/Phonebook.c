@@ -32,15 +32,15 @@ Phonebook_t* CreatePhonebook(const char* pbFilename, const char* credentialsFile
 	}
 
 	printf("loading data from files... ");
-	size_t readed = 0;
-	readed = LoadPhonebookFromFile(newPb);
-	printf("readed %lu bytes from %s ", readed, pbFilename);
+	size_t read = 0;
+	read = LoadPhonebookFromFile(newPb);
+	printf("read %lu bytes from %s ", read, pbFilename);
 
-	readed = LoadCredentialsFromFile(newPb);
-	if(readed == 0)							// If credentials file has no content
+	read = LoadCredentialsFromFile(newPb);
+	if(read == 0)							// If credentials file has no content
 		AddCredential(newPb, "admin", "0000", "RW", 0, 1);	// Add a default credential
 
-	printf("readed %lu bytes from %s\n", readed, credentialsFilename);
+	printf("read %lu bytes from %s\n", read, credentialsFilename);
 	return newPb;
 }
 
