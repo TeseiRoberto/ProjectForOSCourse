@@ -24,7 +24,8 @@ typedef struct _Tester {
 } Tester_t;
 
 
-int InitializeSocket(int* sock, const char* address, const char* portNum, struct addrinfo** addrStruct);
+int InitializeSocket(int* sock, struct sockaddr_in* addr);
+int GetAddressStruct(const char* ipAddress, const char* portNum, struct sockaddr_in* addr);
 
 int InitializeTesters(Tester_t** testers, int threadNum, int getReqNum, int addReqNum, int removeReqNum);
 void DestroyTesters(Tester_t** testers, int testerNum);
@@ -35,14 +36,14 @@ void PrintResults(Tester_t* tester, int testerNum);
 // Array of strings that will be used when simulating GET_CONTACT requests
 char* toSearch[] = { "Giuseppe", "Anna", "Gianni", "Luca"};
 
-// Array of strings that will be used when simulating GET_CONTACT requests
+// Array of strings that will be used when simulating ADD_CONTACT requests
 char* toAdd[] = { "Max", "Riccardo", "Laura", "Andrea" };
 
-// Array of strings that will be used when simulating GET_CONTACT requests
+// Array of strings that will be used when simulating REMOVE_CONTACT requests
 char* toRemove[] = { "Ugo", "Federico", "Alessandra", "Miriam"};
 
 Tester_t* testers = NULL;		// Array of Tester_t structs
-struct addrinfo* serverAddr = NULL;	// Struct that contains server's address
+struct sockaddr_in serverAddr;		// Struct that contains server's address
 sem_t startSem;				// Semaphore to enable begin of simulation
 
 int main(int argc, char* argv[])
@@ -66,6 +67,9 @@ int main(int argc, char* argv[])
 		exit(-1);
 	}
 
+	if(GetAddressStruct(SERVER_ADDRESS, SERVER_PORT_NUM, &serverAddr) == 0)		// Fill serverAddr struct
+		exit(-1);
+
 	// Allocate and initialize an array of testers
 	if(InitializeTesters(&testers, testersNum, getReqNum, addReqNum, removeReqNum) == 0)
 		exit(-1);
@@ -84,39 +88,44 @@ int main(int argc, char* argv[])
 }
 
 
-// Creates a new socket for UDP communication, also retrives and initializes serverAddress (if yet not initialized)
-int InitializeSocket(int* sock, const char* address, const char* portNum, struct addrinfo** addrStruct)
+// Retrives server's address and fills the struct given with it
+int GetAddressStruct(const char* ipAddress, const char* portNum, struct sockaddr_in* addr)
 {
-	if(*sock != -1 || address == NULL || portNum == NULL || addrStruct == NULL)
-		return 0;
-
-	if(*addrStruct == NULL)					// If server address has not yet been initialized
+	if(ipAddress == NULL || portNum == NULL || addr == NULL)
 	{
-		*addrStruct = malloc(sizeof(struct addrinfo));	// Allocate memory to hold server's address
-		if(*addrStruct == NULL)
-		{
-			fprintf(stderr, "Error: cannot allocate memory to hold server's address...\n");
-			return 0;
-		}
-
-		struct addrinfo addrHints;			// Set properties that server's address should have
-		memset(&addrHints, 0, sizeof(struct addrinfo));
-		memset(serverAddr, 0, sizeof(struct addrinfo));
-		addrHints.ai_family = AF_INET;
-		addrHints.ai_protocol = 0;
-		addrHints.ai_socktype = SOCK_DGRAM;
-
-		if(getaddrinfo(address, portNum, &addrHints, addrStruct) != 0)	// Try to get server's address
-		{
-			fprintf(stderr, "Error: getaddrinfo() failed...\n");
-			return 0;
-		}
+		return 0;
 	}
 
-	*sock = socket((*addrStruct)->ai_family, (*addrStruct)->ai_socktype, (*addrStruct)->ai_protocol);
+	struct addrinfo addrHints;						// Set properties that server's address should have
+	struct addrinfo* serverAddress;
+	memset(&addrHints, 0, sizeof(struct addrinfo));
+	addrHints.ai_family = AF_INET;
+	addrHints.ai_protocol = 0;
+	addrHints.ai_socktype = SOCK_DGRAM;
+	addrHints.ai_flags = 0;
+
+	if(getaddrinfo(ipAddress, portNum, &addrHints, &serverAddress) != 0)	// Try to get server's address
+	{
+		fprintf(stderr, "Error: getaddrinfo() failed, cannot retrive server's address...\n");
+		return 0;
+	}
+
+	memcpy(addr, serverAddress->ai_addr, sizeof(struct sockaddr_in));
+	return 1;
+}
+
+
+// Creates a new socket for UDP communication
+int InitializeSocket(int* sock, struct sockaddr_in* addr)
+{
+	if(*sock != -1 || addr == NULL)
+		return 0;
+
+	*sock = socket(addr->sin_family, SOCK_DGRAM, 0);
 	if(*sock == -1)
 	{
 		fprintf(stderr, "Error: cannot create socket for tester...\n");
+		printf("WHY: %s\n", strerror(errno));
 		return 0;
 	}
 
@@ -135,6 +144,8 @@ int InitializeTesters(Tester_t** testers, int testerNum, int getReqNum, int addR
 		return 0;
 
 	printf("Intializing testers... ");
+	fflush(stdout);
+
 	*testers = malloc(sizeof(Tester_t) * testerNum);		// Allocate an array of Tester_t
 	if(*testers == NULL)
 	{
@@ -161,7 +172,7 @@ int InitializeTesters(Tester_t** testers, int testerNum, int getReqNum, int addR
 		curr->sock = -1;
 		strncpy(curr->request.clientName, "admin", MAX_NAME_SIZE);	// Set clientName in request as "admin" so that it has all permissions
 		
-		if(InitializeSocket(&curr->sock, LOCAL_ADDRESS, SERVER_PORT_NUM, &serverAddr) == 0)	// Create a socket
+		if(InitializeSocket(&curr->sock, &serverAddr) == 0)	// Create a socket
 		{
 			for(int j = 0; j < i; j++)			// If create socket fails 
 			{
@@ -266,7 +277,7 @@ void* SimulateRequest(void* tester)
 	Tester_t* me = (Tester_t*) tester;
 	sem_wait(&startSem);					// Wait main thread to enable simulation
 
-	if(SendPacket(me->sock, &me->request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
+	if(SendPacket(me->sock, &me->request, &serverAddr, sizeof(serverAddr)) == 0)
 	{
 		snprintf(me->response.name, MAX_NAME_SIZE, "Thread has failed to send request...\n");
 		return NULL;
@@ -310,5 +321,4 @@ void PrintResults(Tester_t* testers, int testerNum)
 		}
 	}
 }
-
 
