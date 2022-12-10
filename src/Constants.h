@@ -10,7 +10,7 @@
 #define MAX_PASSWORD_SIZE	MAX_PHONE_NUM_SIZE - MAX_PERMISSION_SIZE	// Max number of characters that compose a password
 #define MAX_RESPONSE_SIZE 	MAX_NAME_SIZE + MAX_PHONE_NUM_SIZE + 32		
 #define SERVER_PORT_NUM		"9090"						// Port number used by the server
-#define LOCAL_ADDRESS		"127.0.0.1"					// Machine's local address
+#define SERVER_ADDRESS		"127.0.0.1"					// Ip address of the server
 #define MAX_CLIENT_NUM		4						// Max number of clients that the server can handle concurrently
 #define SEPARATOR_CHAR		';'						// Character used in files to separate fields of the same entry
 #define REMOVED_CHAR		'|'						// Character used in files to mark an entry as removed (canceled by a user)
