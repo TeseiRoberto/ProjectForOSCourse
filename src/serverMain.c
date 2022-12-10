@@ -22,7 +22,7 @@ typedef struct _Worker {
 	sem_t isBusy;				// Semaphore that signals to worker that it has a request to satisfy
 	sem_t isFree;				// Semaphore that signals to main thread that worker can accept a new request
 	Packet_t request;			// Request packet sent by client
-	Packet_t response;			// response packet sent to client
+	Packet_t response;			// Response packet sent to client
 	struct sockaddr_in clientAddr;		// Struct that contains the address of the client of which we need to satisfy request
 	socklen_t addrLen;			// Length of the client address
 } Worker_t;
@@ -42,6 +42,7 @@ int serverSock = -1;
 pthread_mutex_t socketMutx;			// Mutex to regulate write operations on server's socket
 sem_t pbSem;					// Semaphore to regulate read and write operations on/from phonebook data
 Worker_t workers[MAX_CLIENT_NUM];		// Workers that works to satisfy clients requests
+
 
 int main(int argc, char* argv[])
 {
@@ -117,6 +118,7 @@ int InitializeSocket(const char* portNum)
 	addrHints.ai_family = AF_INET;
 	addrHints.ai_protocol = 0;
 	addrHints.ai_socktype = SOCK_DGRAM;
+	addrHints.ai_flags = AI_PASSIVE;
 
 	if(getaddrinfo(NULL, portNum, &addrHints, &serverAddr) != 0)	// Get server address
 	{
@@ -331,7 +333,7 @@ void* HandleRequest(void* ptrToWorker)
 		}
 
 		pthread_mutex_lock(&socketMutx);
-		SendPacket(serverSock, &me->response, &me->clientAddr, me->addrLen);			// Send response packet
+		SendPacket(serverSock, &me->response, &me->clientAddr, me->addrLen);		// Send response packet
 		pthread_mutex_unlock(&socketMutx);
 
 		sem_post(&pbSem);								// Signal to main thread that we completed our operation on phonebook struct
@@ -353,7 +355,7 @@ void SigIntHandler(int dummy)
 
 
 // Shell function was used during development to verify that the system was working properly, it enables the user to enter 
-// commands to manage the server. The function can be activated by uncommenting line 74 and pressing ctrl-c during runtime.
+// commands to manage the server. The function can be activated by uncommenting line 75 and pressing ctrl-c during runtime.
 // This function is purpousely NOT thread safe due to the fact that was used mainly to check the integrity of internal 
 // data structures AFTER a series of requests from clients. I decided to leave it only for future debug and should not 
 // be considered as part of the "release code"
