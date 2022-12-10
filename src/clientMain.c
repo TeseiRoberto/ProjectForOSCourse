@@ -32,7 +32,7 @@
 
 #endif
 
-int InitializeSocket(const char* address, const char* portNum, struct addrinfo** addrStruct);
+int InitializeSocket(const char* address, const char* portNum, struct sockaddr_in* addrStruct);
 
 int AddContact(char* name, char* number, char* response);
 int GetContact(char* name, char* response);
@@ -40,14 +40,15 @@ int RemoveContact(char* name, char* response);
 int Login(char* username, char* password, char* response);
 
 int clientSock = -1;
-struct addrinfo* serverAddr = NULL;				// Struct that contains server's address 
+struct sockaddr_in serverAddr;					// Struct that contains server's address
+socklen_t serverAddrSize = sizeof(serverAddr);
 char username[MAX_NAME_SIZE];					// Username used to make request to server
 
 int main(void)
 {
 	strncpy(username, "user", MAX_NAME_SIZE);		// Set default username
 
-	if(InitializeSocket(LOCAL_ADDRESS, SERVER_PORT_NUM, &serverAddr) == 0)
+	if(InitializeSocket(SERVER_ADDRESS, SERVER_PORT_NUM, &serverAddr) == 0)
 		exit(-1);
 
 	#ifdef USE_GUI
@@ -177,45 +178,47 @@ int main(void)
 	} while(commandBuff[0] != '5');
 	#endif
 
-	freeaddrinfo(serverAddr);
 	close(clientSock);
 	return 0;
 }
 
 
 // Allocates an addrinfo struct, fills it with info about the address and creates a UDP socket to communicate with such address
-int InitializeSocket(const char* address, const char* portNum, struct addrinfo** addrStruct)
+int InitializeSocket(const char* address, const char* portNum, struct sockaddr_in* addrStruct)
 {
 	// Check if something has already been initialized or if there are missing parameters
-	if(clientSock != -1 || address == NULL || portNum == NULL || addrStruct == NULL || *addrStruct != NULL)
+	if(clientSock != -1 || address == NULL || portNum == NULL || addrStruct == NULL)
 		return 0;
 
 	printf("Intializing socket... ");
-	*addrStruct = malloc(sizeof(struct addrinfo));
-	if(*addrStruct == NULL)
-	{
-		fprintf(stderr, "Error: cannot allocate memory to hold server's address\n");
-		return 0;
-	}
 
 	struct addrinfo addrHints;				// Set properties that server's address should have
+	struct addrinfo* serverAddress = NULL;
 	memset(&addrHints, 0, sizeof(struct addrinfo));
-	memset(serverAddr, 0, sizeof(struct addrinfo));
 	addrHints.ai_family = AF_INET;
 	addrHints.ai_protocol = 0;
 	addrHints.ai_socktype = SOCK_DGRAM;
+	addrHints.ai_flags = 0;
 
-	if(getaddrinfo(address, portNum, &addrHints, addrStruct) != 0)	// Try to get server's address
+	if(getaddrinfo(address, portNum, &addrHints, &serverAddress) != 0)	// Try to get server's address
 	{
 		fprintf(stderr, "Error: getaddrinfo() failed\n");
 		return 0;
 	}
 
-	clientSock = socket((*addrStruct)->ai_family, (*addrStruct)->ai_socktype, (*addrStruct)->ai_protocol);
+	clientSock = socket(serverAddress->ai_family, serverAddress->ai_socktype, serverAddress->ai_protocol);
 	if(clientSock == -1)
 	{
 		fprintf(stderr, "Error: cannot create socket for client\n");
-		freeaddrinfo(serverAddr);
+		freeaddrinfo(serverAddress);
+		return 0;
+	}
+
+	if(connect(clientSock, serverAddress->ai_addr, serverAddress->ai_addrlen) != 0)
+	{
+		fprintf(stderr, "Error: cannot connect socket to server\n");
+		freeaddrinfo(serverAddress);
+		close(clientSock);
 		return 0;
 	}
 
@@ -226,6 +229,10 @@ int InitializeSocket(const char* address, const char* portNum, struct addrinfo**
 	{
 		fprintf(stderr, "Warning: cannot set timeout for receive operations on socket... ");
 	}
+
+	// Copy server address in struct given as parameter
+	memcpy(addrStruct, serverAddress->ai_addr, sizeof(struct sockaddr_in));
+	freeaddrinfo(serverAddress);
 
 	printf("Socket ready!\n");
 	return 1;
@@ -247,7 +254,7 @@ int AddContact(char* name, char* number, char* response)
 	strncpy(request.name, name, MAX_NAME_SIZE);		// Copy contact name in packet
 	strncpy(request.number, number, MAX_PHONE_NUM_SIZE);	// Copy contact number in packet
 	
-	if(SendPacket(clientSock, &request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
+	if(SendPacket(clientSock, &request, &serverAddr, serverAddrSize) == 0)
 	{
 		snprintf(response, MAX_RESPONSE_SIZE, "Failed to send request...");
 		return 0;
@@ -278,7 +285,7 @@ int GetContact(char* name, char* response)
 	strncpy(request.clientName, username, MAX_NAME_SIZE);	// Copy client name in packet
 	strncpy(request.name, name, MAX_NAME_SIZE);		// Copy contact name in packet
 
-	if(SendPacket(clientSock, &request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
+	if(SendPacket(clientSock, &request, &serverAddr, serverAddrSize) == 0)
 	{
 		snprintf(response, MAX_RESPONSE_SIZE, "Failed to send request...");
 		return 0;
@@ -315,7 +322,7 @@ int RemoveContact(char* name, char* response)
 	strncpy(request.clientName, username, MAX_NAME_SIZE);			// Copy client name in packet
 	strncpy(request.name, name, MAX_NAME_SIZE);				// Copy contact name in packet
 	
-	if(SendPacket(clientSock, &request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
+	if(SendPacket(clientSock, &request, &serverAddr, serverAddrSize) == 0)
 	{
 		snprintf(response, MAX_RESPONSE_SIZE, "Failed to send request...");
 		return 0;
@@ -347,7 +354,7 @@ int Login(char* user, char* password, char* response)
 	strncpy(request.name, user, MAX_NAME_SIZE);		// Copy user in packet
 	strncpy(request.number, password, MAX_PASSWORD_SIZE);	// Copy client's password in packet
 	
-	if(SendPacket(clientSock, &request, (struct sockaddr_in*) serverAddr->ai_addr, serverAddr->ai_addrlen) == 0)
+	if(SendPacket(clientSock, &request, &serverAddr, serverAddrSize) == 0)
 	{
 		snprintf(response, MAX_RESPONSE_SIZE, "Failed to send request...");
 		return 0;
